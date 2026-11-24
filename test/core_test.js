@@ -34,7 +34,7 @@ function huntBot(S, zone) {
 var S = C.newGame('t1', { name: '測試', cls: 'warrior' });
 ok(C.labor(S) === 9, '開局可派 9 人，實際 ' + C.labor(S));
 ok(C.used(S) === 9, '開局自動派滿');
-ok(C.defense(S) === 19, '開局防禦 19，實際 ' + C.defense(S));
+ok(C.defense(S) === 25, '開局防禦 25，實際 ' + C.defense(S));
 ok(C.gateMiss(S).length > 5, '開局升格條件未滿');
 inv(S, '開局');
 // 2. 派工上限

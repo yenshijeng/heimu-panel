@@ -1,13 +1,13 @@
 /* 黑木村 領主帳本 介面 ui.js */
 (function () {
 'use strict';
-var C = window.HMCore, UIVER = '2.1.0';
+var C = window.HMCore, UIVER = '2.2.0';
 var KS = LTStore.create('heimu');
 var EMB = window.parent !== window;
 var DEBUG = /[?&]debug=1/.test(location.search);
 var early = []; function earlyMsg(e) { early.push(e); } window.addEventListener('message', earlyMsg);
 
-var S = null, story = [], tab = 'village', busy = false, toastT = 0, modal = null, storeErr = '', draft = '', scrollStory = true, lastRep = null, buyN = 1, nameIn = '', clsIn = 'warrior';
+var S = null, story = [], tab = 'village', busy = false, toastT = 0, modal = null, storeErr = '', draft = '', scrollStory = true, lastRep = null, buyN = 1, talkWho = 'lilith', nameIn = '', clsIn = 'warrior';
 var app = document.getElementById('app');
 function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 function J(k) { var v = KS.get(k); if (!v) return null; try { return JSON.parse(v); } catch (e) { return null; } }
@@ -69,14 +69,14 @@ function onStory(d) {
 
 /* ---------- 操作 ---------- */
 function doAct(a) {
-  if (busy) { toast('AI 還在回覆，等一下'); return; }
+  if (busy) { toast('AI 還在回覆，等一下'); return false; }
   var snap = JSON.stringify(S), pre = S.pending.slice(), r = C.act(S, a);
-  if (r.err) { toast(r.err); return; }
+  if (r.err) { toast(r.err); return false; }
   var u = J('undo') || []; u.push(snap); KS.set('undo', JSON.stringify(u.slice(-5)));
-  if (r.silent) { tab = 'village'; save(); render(); arm(); return; }
+  if (r.silent) { tab = 'village'; save(); render(); arm(); return true; }
   S.pending = [];
   sendToAI(r.text + '\n' + C.stateBlock(S, { result: r.result, digest: pre }), r.text);
-  storyPush({ k: 'res', t: r.result }); save(); render(); arm();
+  storyPush({ k: 'res', t: r.result }); save(); render(); arm(); return true;
 }
 function finishWith(r) { /* 出獵回村、巡視決定：結果已入帳，交給 AI 演出 */
   if (r.err) { toast(r.err); return; }
@@ -105,7 +105,7 @@ function pageCard() {
 }
 function endDay() {
   if (busy) { toast('AI 還在回覆，等一下'); return; }
-  function go() { closeModal(); pushUndo(); var rep = C.endDay(S); lastRep = rep; sendToAI(C.dayEndMessage(S, rep), '【日結】第 ' + rep.day + ' 天結束'); storyPush({ k: 'res', t: rep.lines.concat(rep.morning).join('\n') }); tab = window.innerWidth < 760 ? 'story' : 'village'; save(); render(); arm(); }
+  function go() { closeModal(); pushUndo(); var wasTut = S.tut >= 0; if (wasTut) S.tut = -1; var rep = C.endDay(S); if (wasTut) storyPush({ k: 'sys', t: '教學結束。魔獸第 7 天第一次來襲，晨報會提前預告；升格條件列在「村莊」頁。' }); lastRep = rep; sendToAI(C.dayEndMessage(S, rep), '【日結】第 ' + rep.day + ' 天結束'); storyPush({ k: 'res', t: rep.lines.concat(rep.morning).join('\n') }); tab = window.innerWidth < 760 ? 'story' : 'village'; save(); render(); arm(); }
   var warn = [];
   if (S.ap > 0) warn.push('還有 ' + S.ap + ' 個行動點沒用');
   if (C.idle(S) > 0) warn.push('有 ' + C.idle(S) + ' 人沒派工');
@@ -127,6 +127,12 @@ function viewNew() {
     '<div class="cls">' + Object.keys(C.CLASSES).map(function (k) { var c = C.CLASSES[k]; return '<button data-a="cls" data-k="' + k + '" class="' + (clsIn === k ? 'sel' : '') + '"><b>' + c.n + '</b><small>' + c.d + '</small></button>'; }).join('') + '</div>' +
     btn('start', '開始第一天', false, 'pri') + '</div>';
 }
+var TUT = ['【教學 1/5】先看「派工」頁：人手不夠分，這是每天最重要的決定。派工不花行動點。',
+  '【教學 2/5】到「建造」頁開工蓋一座房屋。住房滿了就不會有新的人來。',
+  '【教學 3/5】回「村莊」頁，選一位領班「找他談談」（花 1 行動點）。只有在場的人會開口。',
+  '【教學 4/5】按「親自出獵・邊緣」。敵人會預告下一步：獵物會逃，要在回合內打倒；看到「蓄力」就防禦。',
+  '【教學 5/5】剩下的行動點可以巡視村子或到「建造」頁監工。都做完就按「結束這一天」。'];
+function tutBar() { return S.tut >= 0 && TUT[S.tut] ? '<div class="tut"><span>' + TUT[S.tut] + '</span><button data-a="tutskip">跳過教學</button></div>' : ''; }
 function topBar() {
   var r = S.res, fc = C.raidForecast(S), ap = ''; for (var i = 0; i < C.CFG.ap; i++) ap += i < S.ap ? '●' : '○';
   return '<div class="top"><b>第 ' + S.day + ' 天</b><span class="ap" title="行動點">' + ap + '</span><span>糧 ' + R(r.food) + '</span><span>木 ' + R(r.wood) + '</span><span>石 ' + R(r.stone) + '</span><span>鐵 ' + R(r.iron) + '</span><span>素材 ' + r.mats + '</span><span>人口 ' + S.pop + '/' + C.popCap(S) + '</span><span>防禦 ' + C.defense(S, true) + '</span>' +
@@ -153,7 +159,7 @@ function pageVillage() {
   var h = '', miss = C.gateMiss(S), fc = C.raidForecast(S), pn = C.planNet(S);
   if (lastRep && lastRep.day === S.day - 1) h += '<div class="card"><h3>晨報</h3><ul><li>' + lastRep.lines.concat(lastRep.morning).map(esc).join('</li><li>') + '</li></ul></div>';
   h += '<div class="card"><h3>今天要做什麼（行動點 ' + S.ap + '/' + C.CFG.ap + '）</h3><div class="acts">';
-  C.FOREMEN.forEach(function (f) { var away = C.POSTS[S.post[f.id]].away || S.hurt[f.id] > 0; h += btn('talk', '找' + f.n + '談<small>' + C.placeOf(S, f.id) + '</small>', busy || away || S.ap < 1, '', ' data-who="' + f.id + '"'); });
+  h += '<span class="grp"><select id="who">' + C.FOREMEN.map(function (f) { var away = C.POSTS[S.post[f.id]].away || S.hurt[f.id] > 0; return '<option value="' + f.id + '"' + (away ? ' disabled' : '') + (f.id === talkWho ? ' selected' : '') + '>' + f.n + '（' + f.role + '｜' + C.placeOf(S, f.id) + '）</option>'; }).join('') + '</select>' + btn('talk', '找他談談<small>1 點</small>', busy || S.ap < 1) + '</span>';
   h += btn('hunt', '親自出獵・邊緣<small>1 點</small>', busy || S.ap < 1 || S.lord.hurt > 0, '', ' data-z="edge"');
   h += btn('hunt', '親自出獵・中層<small>2 點' + (S.has.hut2 ? '' : '｜要獵人小屋 Lv2') + '</small>', busy || S.ap < 2 || !S.has.hut2 || S.lord.hurt > 0, '', ' data-z="mid"');
   h += btn('patrol', '巡視村子<small>1 點｜會遇到要你決定的事</small>', busy || S.ap < 1);
@@ -166,13 +172,16 @@ function pageVillage() {
   return h;
 }
 function pageWork() {
-  var h = '<div class="card"><h3>派工（可派 ' + C.labor(S) + ' 人，閒置 ' + C.idle(S) + '）</h3><p class="muted">人口 ' + S.pop + ' 人中約七成能下田上工，再扣掉民兵 ' + S.mil + ' 人。派工不花行動點。</p>', p = C.production(S);
-  var rows = [['farm', '農田', '糧食（含羊圈）+' + R(p.food) + '，全村每天吃 ' + R(p.eat)], ['lumber', '伐木場', '木柴 +' + R(p.wood)], ['quarry', '採石場', '石頭 +' + R(p.stone)], ['sheep', '羊圈', S.assign.sheep ? '糧食與毛皮' : '沒人顧'], ['build', '工地', S.q.length ? S.q.length + ' 件工程，要 ' + C.buildNeed(S) + ' 人' : '沒有工程']];
+  var h = '<div class="card"><h3>派工（可派 ' + C.labor(S) + ' 人，閒置 ' + C.idle(S) + '）</h3><p class="muted">人口 ' + S.pop + ' 人中約六成五能下田上工，再扣掉民兵 ' + S.mil + ' 人。派工不花行動點。</p>', p = C.production(S);
+  var rows = [['farm', '農田', '糧食（含採集、羊圈）+' + R(p.food) + '，全村每天吃 ' + R(p.eat)], ['lumber', '伐木場', '木柴 +' + R(p.wood)], ['quarry', '採石場', '石頭 +' + R(p.stone)], ['sheep', '羊圈', S.assign.sheep ? '糧食與毛皮' : '沒人顧'], ['build', '工地', S.q.length ? S.q.length + ' 件工程，要 ' + C.buildNeed(S) + ' 人' : '沒有工程']];
   rows.forEach(function (r) { var cap = r[0] === 'build' ? C.buildNeed(S) : C.slots(S, r[0]), n = S.assign[r[0]];
     h += '<div class="job"><span class="jn">' + r[1] + '</span>' + btn('dec', '−', n <= 0, 'step', ' data-j="' + r[0] + '"') + '<b>' + n + '/' + cap + '</b>' + btn('inc', '＋', n >= cap || C.idle(S) <= 0, 'step', ' data-j="' + r[0] + '"') + '<span class="muted">' + r[2] + '</span></div>'; });
   h += '<div class="row">' + btn('auto', '自動派工') + '</div></div><div class="card"><h3>領班</h3>';
+  var fixed = [];
   C.FOREMEN.forEach(function (f) { var hurt = S.hurt[f.id] > 0;
-    h += '<div class="job"><span class="jn">' + f.n + '<small>' + f.role + '</small></span>' + (hurt ? '<span class="warn">養傷中，還要 ' + S.hurt[f.id] + ' 天</span>' : '<select data-post="' + f.id + '">' + f.posts.map(function (p) { return '<option value="' + p + '"' + (S.post[f.id] === p ? ' selected' : '') + '>' + C.POSTS[p].n + '</option>'; }).join('') + '</select><span class="muted">' + C.POSTS[S.post[f.id]].eff + '</span>') + '</div>'; });
+    if (f.posts.length < 2 && !hurt) { fixed.push(f.n + '：' + C.POSTS[S.post[f.id]].n + '（' + C.POSTS[S.post[f.id]].eff + '）'); return; }
+    h += '<div class="job"><span class="jn">' + f.n + '<small>' + f.role + '</small></span>' + (hurt ? '<span class="warn">休養中，還要 ' + S.hurt[f.id] + ' 天</span>' : '<select data-post="' + f.id + '">' + f.posts.map(function (p) { return '<option value="' + p + '"' + (S.post[f.id] === p ? ' selected' : '') + '>' + C.POSTS[p].n + '</option>'; }).join('') + '</select><span class="muted">' + C.POSTS[S.post[f.id]].eff + '</span>') + '</div>'; });
+  h += '<p class="muted">固定崗位：' + fixed.join('；') + '</p>';
   return h + '</div>';
 }
 function pageBuild() {
@@ -197,7 +206,7 @@ function render() {
     if (wide && tab === 'story') tab = 'village';
     if ((S.hunt || S.card) && tab !== 'story') tab = 'village';
     var pg = S.hunt && tab !== 'story' ? pageHunt() : S.card && tab !== 'story' ? pageCard() : { village: pageVillage, work: pageWork, build: pageBuild, more: pageMore, story: pageStory }[tab]();
-    h += topBar() + '<div class="tabs">' + TABS.filter(function (t) { return !(wide && t[0] === 'story'); }).map(function (t) { return '<button data-a="tab" data-k="' + t[0] + '" class="' + (tab === t[0] ? 'sel' : '') + '">' + t[1] + '</button>'; }).join('') + '</div>';
+    h += topBar() + tutBar() + '<div class="tabs">' + TABS.filter(function (t) { return !(wide && t[0] === 'story'); }).map(function (t) { return '<button data-a="tab" data-k="' + t[0] + '" class="' + (tab === t[0] ? 'sel' : '') + '">' + t[1] + '</button>'; }).join('') + '</div>';
     h += wide ? '<div class="wide"><div class="col">' + pageStory() + '</div><div class="col pg">' + pg + '</div></div>' : '<div class="pg' + (tab === 'story' ? ' full' : '') + '">' + pg + '</div>';
   }
   if (modal) h += '<div class="mask"><div class="modal"><h3>' + esc(modal.title) + '</h3>' + modal.body + '<div class="row">' + modal.buttons.map(function (b, i) { return '<button data-a="modal" data-i="' + i + '" class="' + (i ? '' : 'pri') + '">' + esc(b[0]) + '</button>'; }).join('') + '</div></div></div>';
@@ -213,39 +222,40 @@ app.addEventListener('click', function (e) {
   var b = e.target.closest('[data-a]'); if (!b || b.disabled) return; var a = b.dataset.a;
   if (a === 'cls') { var nm = document.getElementById('nm'); nameIn = nm ? nm.value : nameIn; clsIn = b.dataset.k; render(); }
   else if (a === 'start') { var n2 = document.getElementById('nm'); S = C.newGame(String(Date.now()), { name: (n2 && n2.value.trim()) || '領主', cls: clsIn }); story = []; lastRep = null; KS.del('undo'); KS.del('rep'); save(); render(); arm();
-    sendToAI('【開局】我是' + S.lord.name + '（' + C.CLASSES[S.lord.cls].n + '），今天起接下黑木村。\n' + C.stateBlock(S, { events: ['新領主上任的第一個清晨，領主獨自在木屋外，還沒有見到任何村民'] }), '【開局】' + S.lord.name + '（' + C.CLASSES[S.lord.cls].n + '）接下黑木村'); }
-  else if (a === 'tab') { if ((S.hunt || S.card) && b.dataset.k !== 'story' && b.dataset.k !== 'village') { toast(S.hunt ? '你還在森林裡' : '先決定眼前這件事'); return; } tab = b.dataset.k; if (tab === 'story') scrollStory = true; render(); }
-  else if (a === 'talk') doAct({ k: 'talk', who: b.dataset.who });
+    sendToAI('【開局】我是' + S.lord.name + '（' + C.CLASSES[S.lord.cls].n + '），今天起接下黑木村。\n' + C.stateBlock(S, { events: ['新領主上任的第一個清晨：領主高燒三天後在領主木屋二樓醒來，侍女莉莉絲守在床邊，把一本空白的領主帳本交給領主'] }), '【開局】' + S.lord.name + '（' + C.CLASSES[S.lord.cls].n + '）接下黑木村'); }
+  else if (a === 'tutskip') { S.tut = -1; save(); render(); }
+  else if (a === 'tab') { if (S.tut === 0 && b.dataset.k === 'work') { S.tut = 1; save(); } if ((S.hunt || S.card) && b.dataset.k !== 'story' && b.dataset.k !== 'village') { toast(S.hunt ? '你還在森林裡' : '先決定眼前這件事'); return; } tab = b.dataset.k; if (tab === 'story') scrollStory = true; render(); }
+  else if (a === 'talk') { var ws = document.getElementById('who'); if (ws) talkWho = ws.value; if (doAct({ k: 'talk', who: talkWho }) && S.tut === 2) { S.tut = 3; save(); render(); } }
   else if (a === 'hunt') doAct({ k: 'hunt', zone: b.dataset.z });
   else if (a === 'caravan') { var sel = document.getElementById('buyn'); doAct({ k: 'caravan', n: sel ? Number(sel.value) : 0 }); }
   else if (a === 'brace') doAct({ k: 'brace' });
   else if (a === 'patrol') doAct({ k: 'patrol' });
   else if (a === 'hact') { var hr = C.huntAct(S, b.dataset.k); if (hr.err) toast(hr.err); save(); render(); }
-  else if (a === 'hback') { if (busy) { toast('AI 還在回覆，等一下'); return; } finishWith(C.huntFinish(S)); }
+  else if (a === 'hback') { if (busy) { toast('AI 還在回覆，等一下'); return; } if (S.tut === 3) S.tut = 4; finishWith(C.huntFinish(S)); }
   else if (a === 'card') { if (busy) { toast('AI 還在回覆，等一下'); return; } var snapC = JSON.stringify(S), cr = C.cardChoose(S, Number(b.dataset.i)); if (!cr.err) { var uu = J('undo') || []; uu.push(snapC); KS.set('undo', JSON.stringify(uu.slice(-5))); } finishWith(cr); }
   else if (a === 'promote') doAct({ k: 'promote' });
   else if (a === 'oversee') doAct({ k: 'oversee', i: Number(b.dataset.i) });
   else if (a === 'end') endDay();
   else if (a === 'inc' || a === 'dec') free(function () { return C.setAssign(S, b.dataset.j, S.assign[b.dataset.j] + (a === 'inc' ? 1 : -1)); });
   else if (a === 'auto') free(function () { C.autoAssign(S); });
-  else if (a === 'build') free(function () { var r = C.startBuild(S, b.dataset.k); if (r.ok) toast(r.moved.length ? '已開工，從' + r.moved.join('、') + '調 ' + r.moved.length + ' 人到工地（可到「派工」調整）' : r.crew < 2 ? '已開工，但工地人手不足' : '已開工'); return r; });
+  else if (a === 'build') free(function () { var r = C.startBuild(S, b.dataset.k); if (r.ok && S.tut === 1) S.tut = 2; if (r.ok) toast(r.moved.length ? '已開工，從' + r.moved.join('、') + '調 ' + r.moved.length + ' 人到工地（可到「派工」調整）' : r.crew < 2 ? '已開工，但工地人手不足' : '已開工'); return r; });
   else if (a === 'opt') { if (!busy) { var dg = S.pending.slice(); S.pending = []; sendToAI(b.dataset.s + '\n' + C.stateBlock(S, { digest: dg }), b.dataset.s); } }
   else if (a === 'say') say();
   else if (a === 'undo') undo();
   else if (a === 'export') showModal('匯出存檔', '<p class="muted">複製下面整段文字保存。</p><textarea readonly rows="8">' + esc(JSON.stringify({ hm: 2, save: S, story: story })) + '</textarea>', [['關閉', closeModal]]);
-  else if (a === 'import') showModal('匯入存檔', '<p class="muted">貼上先前匯出的文字。目前的進度會被取代（會先自動備份）。</p><textarea id="imp" rows="8"></textarea>', [['匯入', function () { try { var o = JSON.parse(document.getElementById('imp').value); if (!o || o.hm !== 2 || !o.save || o.save.v !== 2) throw 0; if (S) KS.set('bak.' + Date.now(), JSON.stringify(S)); S = o.save; story = o.story || []; save(); closeModal(); toast('已匯入'); arm(); } catch (x) { toast('這段文字不是領主帳本的存檔'); } }], ['取消', closeModal]]);
+  else if (a === 'import') showModal('匯入存檔', '<p class="muted">貼上先前匯出的文字。目前的進度會被取代（會先自動備份）。</p><textarea id="imp" rows="8"></textarea>', [['匯入', function () { try { var o = JSON.parse(document.getElementById('imp').value); if (!o || o.hm !== 2 || !o.save || o.save.v !== 2) throw 0; if (S) KS.set('bak.' + Date.now(), JSON.stringify(S)); S = C.migrate(o.save); story = o.story || []; save(); closeModal(); toast('已匯入'); arm(); } catch (x) { toast('這段文字不是領主帳本的存檔'); } }], ['取消', closeModal]]);
   else if (a === 'newgame') showModal('重新開始？', '<p>目前第 ' + S.day + ' 天的進度會清掉（會先自動備份一份）。</p>', [['重新開始', function () { KS.set('bak.' + Date.now(), JSON.stringify(S)); S = null; story = []; lastRep = null; KS.del('save'); KS.del('undo'); KS.del('story'); closeModal(); arm(); }], ['取消', closeModal]]);
   else if (a === 'modal') modal.buttons[Number(b.dataset.i)][1]();
 });
 app.addEventListener('change', function (e) {
-  var t = e.target; if (t.dataset.post) free(function () { return C.setPost(S, t.dataset.post, t.value); }); else if (t.id === 'buyn') buyN = Number(t.value);
+  var t = e.target; if (t.dataset.post) free(function () { return C.setPost(S, t.dataset.post, t.value); }); else if (t.id === 'buyn') buyN = Number(t.value); else if (t.id === 'who') talkWho = t.value;
 });
 app.addEventListener('input', function (e) { if (e.target.id === 'say') draft = e.target.value; else if (e.target.id === 'nm') nameIn = e.target.value; });
 app.addEventListener('keydown', function (e) { if (e.target.id === 'say' && e.key === 'Enter' && !e.ctrlKey && !e.shiftKey && !e.isComposing) { e.preventDefault(); say(); } });
 window.addEventListener('resize', function () { render(); });
 
 KS.ready.then(function () {
-  var sv = J('save'); if (sv && sv.v === 2) S = sv; story = J('story') || []; lastRep = J('rep');
+  var sv = J('save'); if (sv && sv.v === 2) S = C.migrate(sv); story = J('story') || []; lastRep = J('rep');
   if (KS.mode === 'memory') storeErr = '這個瀏覽器無法存檔，關掉就會消失，請用「紀錄」頁匯出';
   window.removeEventListener('message', earlyMsg); window.addEventListener('message', onHost);
   render(); post({ t: 'hello', ver: UIVER }); arm(); early.forEach(onHost); early = [];

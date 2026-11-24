@@ -2,18 +2,18 @@
  * 所有數字只在這裡；介面與 AI 都不自己算。 */
 (function (G) {
 'use strict';
-var VER = '2.1.0';
+var VER = '2.2.0';
 var CFG = {
-  laborRate: 0.7, ap: 3, queue: 2, buildCrew: 2,
+  laborRate: 0.65, ap: 3, queue: 2, buildCrew: 2,
   jobs: {
     farm:   { n: '農田',   slots: 2, per: 7,  res: 'food'  },
-    lumber: { n: '伐木場', slots: 2, per: 18, res: 'wood'  },
-    quarry: { n: '採石場', slots: 2, per: 10, res: 'stone' },
+    lumber: { n: '伐木場', slots: 2, per: 16, res: 'wood'  },
+    quarry: { n: '採石場', slots: 2, per: 8,  res: 'stone' },
     sheep:  { n: '羊圈',   slots: 1, per: 2,  res: 'food'  }
   },
-  gate: { pop: 26, housing: 28, def: 30, mil: 6, surplusDays: 3, surplus: 5, mats: 4, lump: { wood: 100, stone: 60 } },
+  gate: { pop: 26, housing: 28, def: 38, mil: 6, surplusDays: 3, surplus: 5, mats: 4, lump: { wood: 130, stone: 80 } },
   immig: 0.5, slave: { food: 60, keep: 4 }, hideRate: 3,
-  raidFirst: 7, raidEvery: 5, raidStr: [10, 18, 26, 36, 46], raidWarn: 2, brace: 8
+  raidFirst: 7, raidEvery: 5, raidStr: [14, 22, 30, 40, 50], raidWarn: 2, brace: 8
 };
 /* cost: [木, 石, 鐵, 工期(滿編天數)]；multi=可蓋多座；up=升級(只有一次) */
 var B = {
@@ -30,23 +30,47 @@ var B = {
   hut2:     { n: '獵人小屋 Lv2', cost: [40, 10, 5, 2], eff: '開放中層出獵、毛皮 +2' },
   herb:     { n: '草藥屋',       cost: [50, 20, 0, 2], eff: '受傷休養 −1 天' }
 };
-/* 領班：posts[0] 是預設崗位 */
+/* 領班 18 位（全部成年）：posts[0] 是預設崗位 */
 var FOREMEN = [
-  { id: 'hans',   n: '漢斯',     role: '村長',   posts: ['build', 'rest'] },
-  { id: 'grete',  n: '格蕾特',   role: '大廚房', posts: ['kitchen'] },
-  { id: 'baron',  n: '巴隆',     role: '鐵匠',   posts: ['smith', 'build'] },
-  { id: 'alicia', n: '艾莉西亞', role: '獵人',   posts: ['hunt', 'guard'] },
-  { id: 'anna',   n: '安娜',     role: '農家',   posts: ['farm', 'sheep'] }
+  { id: 'otto',    n: '奧爾托',   role: '村長兼會計',     posts: ['office'] },
+  { id: 'lilith',  n: '莉莉絲',   role: '鐵匠學徒、侍女', posts: ['maid', 'build'] },
+  { id: 'alicia',  n: '艾莉西亞', role: '獵人',           posts: ['hunt', 'guard'] },
+  { id: 'baron',   n: '巴隆',     role: '鐵匠',           posts: ['smith', 'build'] },
+  { id: 'martha',  n: '瑪莎',     role: '廚娘',           posts: ['kitchen'] },
+  { id: 'pierre',  n: '皮埃爾',   role: '皮革匠',         posts: ['leather'] },
+  { id: 'huey',    n: '修伊',     role: '木匠',           posts: ['build', 'mill'] },
+  { id: 'lucy',    n: '露西',     role: '編織工',         posts: ['weave'] },
+  { id: 'toby',    n: '托比',     role: '牧羊人',         posts: ['sheep'] },
+  { id: 'anna',    n: '安娜',     role: '採集女工',       posts: ['gather', 'farm'] },
+  { id: 'hans',    n: '漢斯',     role: '老農夫',         posts: ['farm'] },
+  { id: 'grete',   n: '格蕾特',   role: '農婦',           posts: ['farm', 'pickle'] },
+  { id: 'dick',    n: '迪克',     role: '民兵隊長',       posts: ['captain', 'farm'] },
+  { id: 'jenny',   n: '珍妮',     role: '農婦（有孕）',   posts: ['home'] },
+  { id: 'sam',     n: '山姆',     role: '樵夫、民兵',     posts: ['lumber', 'guard'] },
+  { id: 'franz',   n: '弗朗茨',   role: '採石匠',         posts: ['quarry', 'build'] },
+  { id: 'kath',    n: '凱瑟琳',   role: '洗衣婦、雜工',   posts: ['chores'] },
+  { id: 'franz2',  n: '小弗朗茨', role: '採石學徒',       posts: ['quarry', 'build'] }
 ];
 var POSTS = {
-  build:   { n: '工地領班', place: '村中心工地', eff: '每天一件工程多推進半天' },
-  rest:    { n: '處理村務', place: '村長屋',     eff: '沒有加成' },
-  kitchen: { n: '掌廚',     place: '村長屋',     eff: '糧食消耗 −5%' },
-  smith:   { n: '打鐵修具', place: '鐵匠鋪',     eff: '木柴、石頭產出 +10%' },
-  hunt:    { n: '帶隊出獵', place: '森林',       eff: '每天自動出獵（平均糧食 +7）', away: 1 },
-  guard:   { n: '守東村口', place: '東村口',     eff: '防禦 +4' },
-  farm:    { n: '農田領班', place: '南側田地',   eff: '一座農田產出 +25%' },
-  sheep:   { n: '顧羊圈',   place: '南側田地',   eff: '羊圈產出加倍' }
+  office:  { n: '處理村務',   place: '村長屋',     eff: '流民來訪機率 +20%' },
+  maid:    { n: '照料領主',   place: '領主木屋',   eff: '領主受傷多恢復 1 天' },
+  build:   { n: '工地領班',   place: '村中心工地', eff: '一件工程每天多推進半天' },
+  kitchen: { n: '掌廚',       place: '大廚房',     eff: '糧食消耗 −5%' },
+  pickle:  { n: '醃菜存糧',   place: '大廚房',     eff: '糧食消耗 −3%' },
+  smith:   { n: '打鐵修具',   place: '鐵匠鋪',     eff: '木柴、石頭產出 +10%' },
+  leather: { n: '鞣皮縫甲',   place: '皮革工坊',   eff: '防禦 +2' },
+  mill:    { n: '維護磨坊',   place: '南側磨坊',   eff: '農田總產出 +5%' },
+  weave:   { n: '編織器皿',   place: '水井邊',     eff: '商隊來時多換到鐵 2' },
+  sheep:   { n: '顧羊圈',     place: '羊圈',       eff: '羊圈產出加倍' },
+  gather:  { n: '採集野菜',   place: '森林邊緣',   eff: '每天糧食 +3' },
+  farm:    { n: '農田領班',   place: '南側田地',   eff: '一座農田產出 +25%' },
+  captain: { n: '帶民兵巡守', place: '東村口',     eff: '防禦 +4' },
+  guard:   { n: '守東村口',   place: '東村口',     eff: '防禦 +4' },
+  home:    { n: '在家休養',   place: '大地家',     eff: '沒有加成' },
+  lumber:  { n: '伐木場領班', place: '伐木場',     eff: '一座伐木場產出 +25%' },
+  quarry:  { n: '採石場領班', place: '後山採石場', eff: '一座採石場產出 +25%' },
+  chores:  { n: '後勤雜務',   place: '水井邊',     eff: '可派人手 +1' },
+  hunt:    { n: '帶隊出獵',   place: '森林',       eff: '每天自動出獵（平均糧食 +7）', away: 1 }
 };
 var CLASSES = { warrior: { n: '戰士', d: '能格擋重擊，每打倒一隻糧食 +2' }, mage: { n: '法師', d: '氣力較多、較容易得到魔獸素材，但挨打很痛' }, priest: { n: '牧師', d: '能治療與護盾，不容易受傷；艾莉西亞休養少 1 天' } };
 var TIER = ['村', '聚落'];
@@ -88,7 +112,7 @@ var CARDS = [
   { id: 'well', place: '南側田地', t: '水井打上來的水有點混，井底大概積了泥。', o: [
     { n: '用石頭重砌井壁、把泥淘乾淨', r: '石頭 −8', fx: { stone: -8 } },
     { n: '先撐著，大家把水煮開再喝', r: '明天安娜鬧肚子，休養 1 天', fx: { sick: ['anna', 1] } }] },
-  { id: 'cellar', place: '村長屋', t: '格蕾特搬開一堆舊木桶，發現底下有個沒人記得的地窖。', o: [
+  { id: 'cellar', place: '大廚房', t: '瑪莎搬開一堆舊木桶，發現底下有個沒人記得的地窖。', o: [
     { n: '清出來收進公倉', r: '糧食 +8，鐵 +2', fx: { food: 8, iron: 2 } },
     { n: '分給各家，讓大家記得領主的好', r: '糧食 +2；有住房空位的話，消息傳出去會多來一個人', fx: { food: 2, pop: 1 } }] }
 ];
@@ -103,11 +127,11 @@ function newGame(seed, lord) {
   var S = {
     v: 2, ver: VER, seed: String(seed || Date.now()), day: 1, ap: CFG.ap, tier: 0, pop: 18, mil: 3,
     lord: { name: (lord && lord.name) || '領主', cls: (lord && lord.cls) || 'warrior', hurt: 0 },
-    res: { food: 60, wood: 60, stone: 20, iron: 0, hide: 0, mats: 0 },
+    res: { food: 60, wood: 50, stone: 20, iron: 0, hide: 0, mats: 0 },
     b: { house: 5, farm: 2, lumber: 2, quarry: 2 }, has: {}, q: [],
     assign: { farm: 0, lumber: 0, quarry: 0, sheep: 0, build: 0 },
     post: {}, hurt: {}, run: 0, trades: 0, net: 0, caravan: null, braced: false, overseen: {}, hunted: 0,
-    stats: { raids: 0, lost: 0, bought: 0, hunts: 0 }, hunt: null, card: null, deck: [], buff: { def: 0, days: 0 }, log: [], pending: [], place: '領主木屋', ended: false, convId: ''
+    stats: { raids: 0, lost: 0, bought: 0, hunts: 0 }, tut: 0, hunt: null, card: null, deck: [], buff: { def: 0, days: 0 }, log: [], pending: [], place: '領主木屋', ended: false, convId: ''
   };
   FOREMEN.forEach(function (f) { S.post[f.id] = f.posts[0]; });
   autoAssign(S);
@@ -116,15 +140,22 @@ function newGame(seed, lord) {
 }
 
 /* ---------- 衍生數值 ---------- */
+function migrate(S) { /* 舊存檔補欄位；崗位不合新名單的改回預設 */
+  S.post = S.post || {}; S.hurt = S.hurt || {}; S.buff = S.buff || { def: 0, days: 0 }; S.deck = S.deck || []; if (S.tut === undefined) S.tut = -1;
+  FOREMEN.forEach(function (f) { if (f.posts.indexOf(S.post[f.id]) < 0) S.post[f.id] = f.posts[0]; });
+  Object.keys(S.post).forEach(function (k) { if (!FOREMEN.some(function (f) { return f.id === k; })) delete S.post[k]; });
+  S.stats = S.stats || {}; clampAssign(S); return S;
+}
 function housing(S) { return S.b.house * 4; }
 function wellCap(S) { return S.has.well2 ? 60 : 24; }
 function popCap(S) { return Math.min(housing(S), wellCap(S)); }
 function milCap(S) { return S.has.barracks ? 10 : 3; }
-function labor(S) { return Math.max(0, Math.floor(S.pop * CFG.laborRate) - S.mil); }
+function labor(S) { return Math.max(0, Math.floor(S.pop * CFG.laborRate) - S.mil + nPost(S, 'chores')); }
 function onPost(S, id, p) { return S.post[id] === p && !(S.hurt[id] > 0); }
-function anyPost(S, p) { return FOREMEN.some(function (f) { return onPost(S, f.id, p); }); }
+function nPost(S, p) { return FOREMEN.filter(function (f) { return onPost(S, f.id, p); }).length; }
+function anyPost(S, p) { return nPost(S, p) > 0; }
 function defense(S, withBrace) {
-  return (S.has.fence2 ? 18 : 10) + (S.has.tower ? 10 : 0) + S.mil * 3 + (anyPost(S, 'guard') ? 4 : 0) + (withBrace && S.braced ? CFG.brace : 0) + (S.buff && S.buff.days > 0 ? S.buff.def : 0);
+  return (S.has.fence2 ? 18 : 10) + (S.has.tower ? 10 : 0) + S.mil * 3 + nPost(S, 'guard') * 4 + nPost(S, 'captain') * 4 + nPost(S, 'leather') * 2 + (withBrace && S.braced ? CFG.brace : 0) + (S.buff && S.buff.days > 0 ? S.buff.def : 0);
 }
 function slots(S, job) { return job === 'sheep' ? 1 : S.b[job] * CFG.jobs[job].slots; }
 function used(S) { var a = S.assign; return a.farm + a.lumber + a.quarry + a.sheep + a.build; }
@@ -132,10 +163,11 @@ function idle(S) { return labor(S) - used(S); }
 function buildNeed(S) { return S.q.length * CFG.buildCrew; }
 function production(S) {
   var a = S.assign, J = CFG.jobs, tool = anyPost(S, 'smith') ? 1.1 : 1;
-  var farm = a.farm / 2 * J.farm.per; if (anyPost(S, 'farm') && a.farm >= 2) farm += J.farm.per * 0.25; farm *= 1.1; /* 磨坊 Lv1 */
-  var sheep = a.sheep ? J.sheep.per * (anyPost(S, 'sheep') ? 2 : 1) : 0;
-  var eat = S.pop * (anyPost(S, 'kitchen') ? 0.95 : 1);
-  return { food: farm + sheep, eat: eat, wood: a.lumber / 2 * J.lumber.per * tool, stone: a.quarry / 2 * J.quarry.per * tool,
+  function job(k) { var full = a[k] / 2 * J[k].per, staffed = Math.floor(a[k] / 2); return full + Math.min(nPost(S, k), staffed) * J[k].per * 0.25; }
+  var farm = job('farm') * (1.1 + nPost(S, 'mill') * 0.05); /* 磨坊 Lv1 +10%，有人維護再 +5% */
+  var sheep = a.sheep ? J.sheep.per * (anyPost(S, 'sheep') ? 2 : 1) : 0, gather = nPost(S, 'gather') * 3;
+  var eat = S.pop * (1 - nPost(S, 'kitchen') * 0.05 - nPost(S, 'pickle') * 0.03);
+  return { food: farm + sheep + gather, eat: eat, wood: job('lumber') * tool, stone: job('quarry') * tool,
     hide: (a.sheep ? 1 : 0) + (S.has.hut2 && anyPost(S, 'hunt') ? 2 : 0), huntAvg: anyPost(S, 'hunt') ? 7 : 0 };
 }
 function planNet(S) { var p = production(S); return p.food + p.huntAvg - p.eat; }
@@ -172,7 +204,7 @@ function autoAssign(S) {
   while (L > 0) {
     var lf = slots(S, 'lumber') - a.lumber, qf = slots(S, 'quarry') - a.quarry;
     if (lf <= 0 && qf <= 0) break;
-    if ((S.res.wood / 18 <= S.res.stone / 10 && lf > 0) || qf <= 0) a.lumber++; else a.quarry++; L--;
+    if ((S.res.wood / 16 <= S.res.stone / 8 && lf > 0) || qf <= 0) a.lumber++; else a.quarry++; L--;
   }
   if (L > 0 && !a.sheep) { a.sheep = 1; L--; }
 }
@@ -304,6 +336,7 @@ function enMax(S) { return HUNT.en + (S.lord.cls === 'mage' ? 2 : 0); }
 function hRoll(S, tag) { var H = S.hunt; return rng(hash(S.seed + '|h|' + S.day + '|' + S.stats.hunts + '|' + H.idx + '|' + H.turn + '|' + tag))(); }
 function spawn(S) {
   var H = S.hunt, pool = ENEMY[H.zone], d = pool[Math.floor(hRoll(S, 'spawn') * pool.length)];
+  if (S.tut === 3) d = { id: 'deer', n: '鹿', hp: 10, atk: 0, flee: 5, food: 10, hide: 1 }; /* 教學：第一趟一定遇到鹿，而且牠比較慢才跑 */
   H.turn = 1; H.e = { id: d.id, n: d.n, hp: d.hp, max: d.hp, atk: d.atk, flee: d.flee || 0, food: d.food, hide: d.hide || 0, mat: d.mat || 0, weak: 0, stun: 0, phase: Math.floor(hRoll(S, 'ph') * 3) };
   H.scan = false; H.shield = H.shield || 0; H.cur = { n: d.n, t: 0, hits: 0, sk: [] }; H.sum = H.sum || []; H.log.push('遇上' + d.n + (d.flee ? '（獵物，' + d.flee + ' 回合後會逃走）' : '')); setIntent(S);
 }
@@ -436,12 +469,13 @@ function endDay(S) {
   if (S.buff && S.buff.days > 0) { S.buff.days--; if (!S.buff.days) S.buff.def = 0; }
   S.card = null;
   S.day++; S.ap = CFG.ap; S.braced = false; S.overseen = {}; S.hunted = 0; S.caravan = null; S.ended = false; S.place = '領主木屋';
+  if (S.lord.hurt > 0 && anyPost(S, 'maid')) S.lord.hurt--;
   if (S.lord.hurt > 0) { S.ap = Math.max(1, S.ap - 1); S.lord.hurt--; }
   Object.keys(S.hurt).forEach(function (k) { if (S.hurt[k] > 0) S.hurt[k]--; });
   var morning = [];
-  if (S.pop < popCap(S) && rnd() < CFG.immig * (S.has.chief2 ? 1.2 : 1) * (net < 0 ? 0.3 : 1)) { S.pop++; morning.push('一名流民在村裡落腳（人口 ' + S.pop + '）'); }
+  if (S.pop < popCap(S) && rnd() < CFG.immig * (S.has.chief2 ? 1.2 : 1) * (1 + nPost(S, 'office') * 0.2) * (net < 0 ? 0.3 : 1)) { S.pop++; morning.push('一名流民在村裡落腳（人口 ' + S.pop + '）'); }
   if (caravanDay(S, S.day)) {
-    var iron = 8, sw = Math.floor(S.res.hide / CFG.hideRate); S.res.iron += iron + sw; S.res.hide -= sw * CFG.hideRate;
+    var iron = 8 + nPost(S, 'weave') * 2, sw = Math.floor(S.res.hide / CFG.hideRate); S.res.iron += iron + sw; S.res.hide -= sw * CFG.hideRate;
     S.caravan = { offer: S.has.market ? 2 : 1, bought: 0, met: false }; if (S.has.market) S.trades++;
     var cv = '商隊抵達西村口，只停留今天：帶來鐵 ' + iron + (sw ? '，毛皮另換到鐵 ' + sw : '') + '；可以買 ' + S.caravan.offer + ' 人';
     morning.push(cv); rep.narrate.push(cv);
@@ -484,6 +518,6 @@ var API = { VER: VER, CFG: CFG, B: B, FOREMEN: FOREMEN, POSTS: POSTS, CLASSES: C
   production: production, planNet: planNet, nextRaid: nextRaid, raidForecast: raidForecast, raidIndex: raidIndex, raidStrength: raidStrength, caravanDay: caravanDay,
   setAssign: setAssign, autoAssign: autoAssign, clampAssign: clampAssign, setPost: setPost, buildCheck: buildCheck, startBuild: startBuild, buildList: buildList, costText: costText,
   HUNT: HUNT, ENEMY: ENEMY, SKILL: SKILL, CARDS: CARDS, ATK: ATK, cardById: cardById, cardChoose: cardChoose, cardOptionCheck: cardOptionCheck, huntAct: huntAct, huntFinish: huntFinish, intentText: intentText, enMax: enMax,
-  presence: presence, placeOf: placeOf, act: act, gateMiss: gateMiss, endDay: endDay, stateBlock: stateBlock, dayEndMessage: dayEndMessage, actionMessage: actionMessage, fmt: fmt };
+  presence: presence, placeOf: placeOf, act: act, migrate: migrate, nPost: nPost, gateMiss: gateMiss, endDay: endDay, stateBlock: stateBlock, dayEndMessage: dayEndMessage, actionMessage: actionMessage, fmt: fmt };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else G.HMCore = API;
 })(typeof window !== 'undefined' ? window : globalThis);
