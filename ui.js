@@ -1,7 +1,7 @@
 /* 黑木村 領主帳本 介面 ui.js */
 (function () {
 'use strict';
-var C = window.HMCore, UIVER = '2.0.0';
+var C = window.HMCore, UIVER = '2.0.1';
 var KS = LTStore.create('heimu');
 var EMB = window.parent !== window;
 var DEBUG = /[?&]debug=1/.test(location.search);
@@ -54,14 +54,16 @@ function onConv(id, u) {
 function storyPush(x) { story.push(x); if (story.length > 12) story = story.slice(-12); scrollStory = true; }
 function blocksText(bl) { return bl.map(function (b) { return (b.k === 'btn' ? b.s : b.t || '') + '\u0001'; }).join(''); }
 function onStory(d) {
-  var bl = (d.blocks || []).filter(function (b) { var t = (b.t || '').trim(); return !(b.k !== 'btn' && /^(正在回覆|思考中)[.…]*$/.test(t)) && t.indexOf('已附領主帳本') < 0; });
+  var bl = (d.blocks || []).filter(function (b) { var t = (b.t || '').trim(); if (b.k === 'btn') return true;
+    return !(/^(正在回覆|思考中|思考過程)[.…]*/.test(t) || /^\d+\s*chars$/i.test(t) || t.indexOf('已附領主帳本') >= 0 || (t.length <= 2 && !/[\u4e00-\u9fffA-Za-z0-9]/.test(t)) || b.k === 'col'); });
+  bl.forEach(function (b) { if (b.k === 'p' && /^【第\s*\d+\s*天[｜|]/.test(b.t)) b.k = 'st'; });
   if (!bl.length) return;
   var last = story[story.length - 1];
-  if (last && last.k === 'ai') {
-    var oldT = blocksText(last.blocks), newT = blocksText(bl); if (oldT === newT) { if (!d.busy && busy) { busy = false; render(); } return; }
-    var head = blocksText(last.blocks.slice(0, -1));
-    if (newT.indexOf(head) === 0 && (head.length > 0 || (bl[0].t || '').indexOf(last.blocks[0].t || '\u0002') === 0)) { last.blocks = bl; scrollStory = true; if (!d.busy) busy = false; save(); render(); return; }
-  }
+  /* 兩則 AI 回覆之間一定隔著玩家的行動；所以最後一筆已經是 AI 時，新的內容就是同一則（串流中或重新生成），原地更新 */
+  if (last && last.k === 'ai') { if (blocksText(last.blocks) !== blocksText(bl)) { last.blocks = bl; scrollStory = true; save(); } if (!d.busy) busy = false; render(); return; }
+  if (!story.some(function (x) { return x.k === 'me'; })) return; /* 還沒有任何行動：聊天頁上的是開場白或別局的舊回覆，不收 */
+  var prev = story.filter(function (x) { return x.k === 'ai'; }).pop();
+  if (prev && blocksText(prev.blocks) === blocksText(bl)) return; /* 重新整理時載入器重送的舊回覆 */
   storyPush({ k: 'ai', blocks: bl }); if (!d.busy) busy = false; save(); render();
 }
 
@@ -171,9 +173,9 @@ function render() {
     h += wide ? '<div class="wide"><div class="col">' + pageStory() + '</div><div class="col pg">' + pg + '</div></div>' : '<div class="pg' + (tab === 'story' ? ' full' : '') + '">' + pg + '</div>';
   }
   if (modal) h += '<div class="mask"><div class="modal"><h3>' + esc(modal.title) + '</h3>' + modal.body + '<div class="row">' + modal.buttons.map(function (b, i) { return '<button data-a="modal" data-i="' + i + '" class="' + (i ? '' : 'pri') + '">' + esc(b[0]) + '</button>'; }).join('') + '</div></div></div>';
-  var sc = document.querySelector('.pg'), top = sc ? sc.scrollTop : 0;
+  var sc = document.querySelector('.pg'), top = sc ? sc.scrollTop : 0, so = document.getElementById('story'), sTop = so ? so.scrollTop : 0, atEnd = !so || so.scrollHeight - so.scrollTop - so.clientHeight < 40;
   app.innerHTML = h;
-  var st = document.getElementById('story'); if (st && scrollStory) { st.scrollTop = st.scrollHeight; scrollStory = false; }
+  var st = document.getElementById('story'); if (st) { if (scrollStory || atEnd) st.scrollTop = st.scrollHeight; else st.scrollTop = sTop; scrollStory = false; }
   var np = document.querySelector('.pg'); if (np) np.scrollTop = top;
   if (keep) { var s = document.getElementById('say'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }
 }
