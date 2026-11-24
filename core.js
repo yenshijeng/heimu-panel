@@ -2,7 +2,7 @@
  * 所有數字只在這裡；介面與 AI 都不自己算。 */
 (function (G) {
 'use strict';
-var VER = '2.0.0';
+var VER = '2.1.0';
 var CFG = {
   laborRate: 0.7, ap: 3, queue: 2, buildCrew: 2,
   jobs: {
@@ -48,8 +48,50 @@ var POSTS = {
   farm:    { n: '農田領班', place: '南側田地',   eff: '一座農田產出 +25%' },
   sheep:   { n: '顧羊圈',   place: '南側田地',   eff: '羊圈產出加倍' }
 };
-var CLASSES = { warrior: { n: '戰士', d: '出獵糧食 +2' }, mage: { n: '法師', d: '出獵較容易得到魔獸素材' }, priest: { n: '牧師', d: '出獵不易受傷、村民休養 −1 天' } };
+var CLASSES = { warrior: { n: '戰士', d: '能格擋重擊，每打倒一隻糧食 +2' }, mage: { n: '法師', d: '氣力較多、較容易得到魔獸素材，但挨打很痛' }, priest: { n: '牧師', d: '能治療與護盾，不容易受傷；艾莉西亞休養少 1 天' } };
 var TIER = ['村', '聚落'];
+/* ---------- 出獵（回合制）資料 ---------- */
+var HUNT = { hp: 30, en: 6, encounters: { edge: 1, mid: 2 }, ap: { edge: 1, mid: 2 }, lightAt: 0.3, rest: [6, 2] };
+var ATK = { warrior: 6, mage: 5, priest: 4 };
+var ENEMY = {
+  edge: [
+    { id: 'deer', n: '鹿',     hp: 10, atk: 0, flee: 3, food: 10, hide: 1 },
+    { id: 'hare', n: '野兔群', hp: 6,  atk: 0, flee: 2, food: 6,  hide: 0 },
+    { id: 'boar', n: '野豬',   hp: 14, atk: 3, food: 11, hide: 0 },
+    { id: 'wolf', n: '灰狼',   hp: 11, atk: 4, food: 5,  hide: 2 }
+  ],
+  mid: [
+    { id: 'iboar', n: '鐵鬃野豬', hp: 20, atk: 4, food: 11, hide: 1, mat: 0.25 },
+    { id: 'swolf', n: '影狼',     hp: 15, atk: 5, food: 6,  hide: 2, mat: 0.5 },
+    { id: 'bear',  n: '角熊',     hp: 26, atk: 7, food: 15, hide: 2, mat: 0.6 }
+  ]
+};
+var SKILL = {
+  warrior: [{ id: 'smash', n: '強攻', en: 2, d: '傷害 1.8 倍' }, { id: 'parry', n: '格擋', en: 1, d: '這回合只受兩成傷害，並反擊一半' }, { id: 'roar', n: '威嚇', en: 2, d: '敵人兩回合攻擊減半；獵物多留一回合' }],
+  mage:    [{ id: 'fire', n: '火球', en: 2, d: '傷害 2.2 倍' }, { id: 'ice', n: '冰縛', en: 2, d: '敵人停兩回合、蓄力被打斷；獵物多留一回合' }, { id: 'scan', n: '探查', en: 1, d: '這一場收穫 +20%、素材機率提高' }],
+  priest:  [{ id: 'heal', n: '治療', en: 2, d: '恢復 9 點體力' }, { id: 'ward', n: '護盾', en: 2, d: '擋下接下來 8 點傷害' }, { id: 'banish', n: '驅散', en: 2, d: '傷害 1.6 倍，敵人攻擊永久 −2' }]
+};
+/* ---------- 巡視事件卡 ---------- */
+var CARDS = [
+  { id: 'tree', place: '森林邊緣', t: '夜裡的風吹倒了一棵老橡樹，橫在獵徑上。', o: [
+    { n: '拖回村裡當建材', r: '木柴 +18', fx: { wood: 18 } },
+    { n: '請巴隆挑硬木做成矛桿', r: '接下來 5 天防禦 +3', fx: { buff: [3, 5] } }] },
+  { id: 'rats', place: '南側田地', t: '糧倉角落被田鼠啃出一個洞，幾袋麥子撒了一地。', o: [
+    { n: '花木柴做捕鼠籠，把糧搶救回來', r: '木柴 −8，糧食 +10', fx: { wood: -8, food: 10 } },
+    { n: '把被啃過的挑出來餵羊', r: '糧食 −4，毛皮 +2', fx: { food: -4, hide: 2 } }] },
+  { id: 'mason', place: '西村口', t: '一個背著鑿子的流浪石匠在村口歇腳，問能不能換頓飯。', o: [
+    { n: '請他吃飯，換他指點採石的門道', r: '糧食 −6，石頭 +15', fx: { food: -6, stone: 15 } },
+    { n: '勸他留下來', r: '糧食 −10，人口 +1（要有住房空位）', fx: { food: -10, pop: 1 } }] },
+  { id: 'fence', place: '東村口', t: '柵欄有一段樁腳鬆了，用手一推就晃。', o: [
+    { n: '拿木柴當場補牢', r: '木柴 −15，接下來 5 天防禦 +4', fx: { wood: -15, buff: [4, 5] } },
+    { n: '先記著，料留給工地', r: '接下來 5 天防禦 −3', fx: { buff: [-3, 5] } }] },
+  { id: 'well', place: '南側田地', t: '水井打上來的水有點混，井底大概積了泥。', o: [
+    { n: '用石頭重砌井壁、把泥淘乾淨', r: '石頭 −8', fx: { stone: -8 } },
+    { n: '先撐著，大家把水煮開再喝', r: '明天安娜鬧肚子，休養 1 天', fx: { sick: ['anna', 1] } }] },
+  { id: 'cellar', place: '村長屋', t: '格蕾特搬開一堆舊木桶，發現底下有個沒人記得的地窖。', o: [
+    { n: '清出來收進公倉', r: '糧食 +8，鐵 +2', fx: { food: 8, iron: 2 } },
+    { n: '分給各家，讓大家記得領主的好', r: '糧食 +2；有住房空位的話，消息傳出去會多來一個人', fx: { food: 2, pop: 1 } }] }
+];
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function hash(str) { var h = 5381; for (var i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return h >>> 0; }
@@ -65,7 +107,7 @@ function newGame(seed, lord) {
     b: { house: 5, farm: 2, lumber: 2, quarry: 2 }, has: {}, q: [],
     assign: { farm: 0, lumber: 0, quarry: 0, sheep: 0, build: 0 },
     post: {}, hurt: {}, run: 0, trades: 0, net: 0, caravan: null, braced: false, overseen: {}, hunted: 0,
-    stats: { raids: 0, lost: 0, bought: 0 }, log: [], pending: [], place: '領主木屋', ended: false, convId: ''
+    stats: { raids: 0, lost: 0, bought: 0, hunts: 0 }, hunt: null, card: null, deck: [], buff: { def: 0, days: 0 }, log: [], pending: [], place: '領主木屋', ended: false, convId: ''
   };
   FOREMEN.forEach(function (f) { S.post[f.id] = f.posts[0]; });
   autoAssign(S);
@@ -82,7 +124,7 @@ function labor(S) { return Math.max(0, Math.floor(S.pop * CFG.laborRate) - S.mil
 function onPost(S, id, p) { return S.post[id] === p && !(S.hurt[id] > 0); }
 function anyPost(S, p) { return FOREMEN.some(function (f) { return onPost(S, f.id, p); }); }
 function defense(S, withBrace) {
-  return (S.has.fence2 ? 18 : 10) + (S.has.tower ? 10 : 0) + S.mil * 3 + (anyPost(S, 'guard') ? 4 : 0) + (withBrace && S.braced ? CFG.brace : 0);
+  return (S.has.fence2 ? 18 : 10) + (S.has.tower ? 10 : 0) + S.mil * 3 + (anyPost(S, 'guard') ? 4 : 0) + (withBrace && S.braced ? CFG.brace : 0) + (S.buff && S.buff.days > 0 ? S.buff.def : 0);
 }
 function slots(S, job) { return job === 'sheep' ? 1 : S.b[job] * CFG.jobs[job].slots; }
 function used(S) { var a = S.assign; return a.farm + a.lumber + a.quarry + a.sheep + a.build; }
@@ -182,6 +224,8 @@ function note(S, t) { S.log.push('第 ' + S.day + ' 天：' + t); if (S.log.leng
 function spend(S, n) { if (S.ended) return '這一天已經結束'; if (S.ap < n) return '行動點不夠（需要 ' + n + '，剩 ' + S.ap + '）'; S.ap -= n; return ''; }
 function act(S, a) {
   var e, f, r;
+  if (S.hunt) return { err: '你還在森林裡，先把這趟狩獵打完' };
+  if (S.card) return { err: '巡視遇到的事還沒決定' };
   if (a.k === 'talk') {
     f = FOREMEN.filter(function (x) { return x.id === a.who; })[0]; if (!f) return { err: '找不到這個人' };
     if (S.hurt[f.id] > 0) return { err: f.n + '在養傷，今天先讓他休息' };
@@ -198,20 +242,13 @@ function act(S, a) {
     note(S, '領主親自監工：' + B[x.k].n + '（剩 ' + fmt(x.left) + ' 天）');
     return { ok: true, text: '【監工】我到工地盯' + B[x.k].n + '的進度，自己也下去搬料。', result: B[x.k].n + '工期 −1 天，還剩 ' + fmt(x.left) + ' 天' };
   }
-  if (a.k === 'hunt') {
-    var deep = a.zone === 'mid';
-    if (deep && !S.has.hut2) return { err: '要先把獵人小屋升到 Lv2 才能進中層' };
-    if (S.lord.hurt > 0) return { err: '你的傷還沒好，今天不能出獵' };
-    if ((e = spend(S, deep ? 2 : 1))) return { err: e };
-    r = roll(S, 'hunt' + S.hunted); S.hunted++; S.place = deep ? '森林中層' : '森林邊緣';
-    var cls = S.lord.cls, hurtP = (deep ? 0.25 : 0.1) * (cls === 'priest' ? 0.5 : 1), o;
-    if (r < 0.1) o = ['大成功', deep ? 26 : 12]; else if (r < 1 - 0.2 - hurtP) o = ['成功', deep ? 18 : 8]; else if (r < 1 - hurtP) o = ['空手', 0]; else o = ['輕傷', deep ? 9 : 4];
-    var food = o[1] ? o[1] + (cls === 'warrior' ? 2 : 0) : 0, mats = 0;
-    if (deep && o[0] !== '空手' && roll(S, 'mat' + S.hunted) < (cls === 'mage' ? 0.85 : 0.6)) mats = o[0] === '大成功' ? 2 : 1;
-    S.res.food += food; S.res.mats += mats; if (o[0] === '輕傷') S.lord.hurt = 1;
-    var res = '出獵結果：' + o[0] + '，糧食 +' + food + (mats ? '，魔獸素材 +' + mats : '') + (o[0] === '輕傷' ? '（受傷的是領主本人，明天少一個行動點）' : '');
-    note(S, '領主親自到' + S.place + '出獵：' + o[0] + '，糧食 +' + food + (mats ? '、素材 +' + mats : ''));
-    return { ok: true, text: '【出獵】我帶著武器進' + S.place + '打獵。', result: res };
+  if (a.k === 'hunt') return huntStart(S, a.zone === 'mid' ? 'mid' : 'edge');
+  if (a.k === 'patrol') {
+    if (S.card) return { err: '還有一件事等你決定' };
+    if ((e = spend(S, 1))) return { err: e };
+    if (!S.deck || !S.deck.length) { S.deck = CARDS.map(function (c) { return c.id; }); var rd = rng(hash(S.seed + '|deck|' + S.day)); for (var i2 = S.deck.length - 1; i2 > 0; i2--) { var j2 = Math.floor(rd() * (i2 + 1)), t2 = S.deck[i2]; S.deck[i2] = S.deck[j2]; S.deck[j2] = t2; } }
+    S.card = S.deck.shift(); var cd = cardById(S.card); S.place = cd.place;
+    return { ok: true, card: cd, silent: true };
   }
   if (a.k === 'caravan') {
     if (!S.caravan) return { err: '商隊今天不在村裡' };
@@ -242,6 +279,113 @@ function act(S, a) {
 }
 function fmt(x) { return x % 1 ? x.toFixed(1) : String(x); }
 
+/* ---------- 巡視事件卡 ---------- */
+function cardById(id) { return CARDS.filter(function (c) { return c.id === id; })[0]; }
+function cardOptionCheck(S, o) {
+  var fx = o.fx, r = S.res;
+  if (fx.wood < 0 && r.wood < -fx.wood) return '木柴不夠'; if (fx.stone < 0 && r.stone < -fx.stone) return '石頭不夠'; if (fx.food < 0 && r.food < -fx.food) return '糧食不夠';
+  return '';
+}
+function cardChoose(S, i) {
+  var cd = cardById(S.card); if (!cd) return { err: '沒有待決定的事' };
+  var o = cd.o[i]; if (!o) return { err: '沒有這個選項' }; var e = cardOptionCheck(S, o); if (e) return { err: e };
+  var fx = o.fx, extra = '';
+  ['food', 'wood', 'stone', 'iron', 'hide'].forEach(function (k) { if (fx[k]) S.res[k] = Math.max(0, S.res[k] + fx[k]); });
+  if (fx.buff) S.buff = { def: fx.buff[0], days: fx.buff[1] };
+  if (fx.sick) S.hurt[fx.sick[0]] = fx.sick[1] + 1;
+  if (fx.pop) { if (S.pop < popCap(S)) { S.pop += fx.pop; extra = '（人口 ' + S.pop + '）'; } else extra = '（沒有住房空位，人沒留下）'; }
+  S.card = null; clampAssign(S);
+  note(S, '巡視' + cd.place + '：' + o.n + '（' + o.r + '）' + extra);
+  return { ok: true, text: '【巡視】我到' + cd.place + '走了一圈。' + cd.t + '我決定：' + o.n + '。', result: o.r + extra };
+}
+
+/* ---------- 回合制出獵 ---------- */
+function enMax(S) { return HUNT.en + (S.lord.cls === 'mage' ? 2 : 0); }
+function hRoll(S, tag) { var H = S.hunt; return rng(hash(S.seed + '|h|' + S.day + '|' + S.stats.hunts + '|' + H.idx + '|' + H.turn + '|' + tag))(); }
+function spawn(S) {
+  var H = S.hunt, pool = ENEMY[H.zone], d = pool[Math.floor(hRoll(S, 'spawn') * pool.length)];
+  H.turn = 1; H.e = { id: d.id, n: d.n, hp: d.hp, max: d.hp, atk: d.atk, flee: d.flee || 0, food: d.food, hide: d.hide || 0, mat: d.mat || 0, weak: 0, stun: 0, phase: Math.floor(hRoll(S, 'ph') * 3) };
+  H.scan = false; H.shield = H.shield || 0; H.cur = { n: d.n, t: 0, hits: 0, sk: [] }; H.sum = H.sum || []; H.log.push('遇上' + d.n + (d.flee ? '（獵物，' + d.flee + ' 回合後會逃走）' : '')); setIntent(S);
+}
+function setIntent(S) { var H = S.hunt, e = H.e; if (!e.atk) { e.intent = 'flee'; return; } e.intent = e.stun > 0 ? 'stun' : ((H.turn + e.phase) % 3 === 2 ? 'charge' : (e.charged ? 'heavy' : 'hit')); }
+function intentText(e) { return { flee: '隨時會逃（剩 ' + e.flee + ' 回合）', stun: '動彈不得', charge: '壓低身體蓄力（下一回合會重擊）', heavy: '要撲上來重擊', hit: '準備攻擊' }[e.intent]; }
+function huntStart(S, zone) {
+  if (S.hunt) return { err: '已經在森林裡了' };
+  if (zone === 'mid' && !S.has.hut2) return { err: '要先把獵人小屋升到 Lv2 才能進中層' };
+  if (S.lord.hurt > 0) return { err: '你的傷還沒好，今天不能出獵' };
+  var e = spend(S, HUNT.ap[zone]); if (e) return { err: e };
+  S.place = zone === 'mid' ? '森林中層' : '森林邊緣'; S.stats.hunts = (S.stats.hunts || 0) + 1;
+  S.hunt = { zone: zone, idx: 0, n: HUNT.encounters[zone], hp: HUNT.hp, en: enMax(S), loot: { food: 0, hide: 0, mats: 0 }, log: [], kills: [], shield: 0, done: null, turn: 1 };
+  spawn(S); return { ok: true, silent: true };
+}
+function huntAct(S, a) {
+  var H = S.hunt; if (!H || H.done) return { err: '現在不在狩獵中' };
+  var e = H.e, cls = S.lord.cls, base = ATK[cls] + Math.floor(hRoll(S, 'dmg') * 3) - 1, dmg = 0, guard = 1, counter = 0, sk = null, msg = '';
+  var cur = H.cur || (H.cur = { n: e.n, t: 0, hits: 0, sk: [] }); H.sum = H.sum || []; cur.t++;
+  if (a === 'retreat') { sumPush(H, '撤退'); H.loot.food = Math.floor(H.loot.food / 2); H.loot.hide = Math.floor(H.loot.hide / 2); H.log.push('你決定撤退，帶不走的獵物只能丟下一半'); return huntEnd(S, 'retreat'); }
+  if (a === 'attack') { dmg = base; msg = '你攻擊' + e.n; }
+  else if (a === 'defend') { guard = 0.5; H.en = Math.min(enMax(S), H.en + 1); msg = '你穩住架勢防禦（氣力 +1）'; }
+  else {
+    sk = SKILL[cls].filter(function (x) { return x.id === a; })[0]; if (!sk) { cur.t--; return { err: '沒有這個動作' }; }
+    if (H.en < sk.en) { cur.t--; return { err: '氣力不夠（需要 ' + sk.en + '）' }; } H.en -= sk.en; if (cur.sk.indexOf(sk.n) < 0) cur.sk.push(sk.n); msg = '你使出' + sk.n;
+    if (a === 'smash') dmg = Math.round(base * 1.8); else if (a === 'parry') { guard = 0.2; counter = Math.round(base * 0.5); }
+    else if (a === 'roar') { e.weak = 2; if (e.flee) e.flee++; } else if (a === 'fire') dmg = Math.round(base * 2.2);
+    else if (a === 'ice') { e.stun = 2; e.charged = false; if (e.flee) e.flee++; } else if (a === 'scan') H.scan = true;
+    else if (a === 'heal') { H.hp = Math.min(HUNT.hp, H.hp + 9); } else if (a === 'ward') H.shield = 8;
+    else if (a === 'banish') { dmg = Math.round(base * 1.6); e.atk = Math.max(0, e.atk - 2); }
+  }
+  if (dmg) { e.hp -= dmg; msg += '，造成 ' + dmg + ' 點傷害'; }
+  /* 敵人行動 */
+  if (e.hp > 0) {
+    if (e.intent === 'flee') { e.flee--; if (e.flee <= 0) { H.log.push(msg + '。' + e.n + '鑽進樹叢逃走了'); return nextEnc(S, false); } msg += '。' + e.n + '還在猶豫'; }
+    else if (e.intent === 'stun') { e.stun--; msg += '。' + e.n + '動彈不得'; }
+    else if (e.intent === 'charge') { e.charged = true; msg += '。' + e.n + '壓低身體蓄力'; }
+    else {
+      var raw = e.atk * (e.intent === 'heavy' ? 2 : 1) * (e.weak > 0 ? 0.5 : 1) + (hRoll(S, 'ea') < 0.5 ? 0 : 1), hit = Math.round(raw * guard);
+      if (e.intent === 'heavy') e.charged = false;
+      if (H.shield > 0) { var ab = Math.min(H.shield, hit); H.shield -= ab; hit -= ab; }
+      if (hit > 0) cur.hits++; H.hp -= hit; msg += '。' + e.n + (e.intent === 'heavy' ? '重擊' : '攻擊') + '，你受到 ' + hit + ' 點傷害';
+      if (counter) { e.hp -= counter; msg += '，並反擊 ' + counter + ' 點'; }
+    }
+    if (e.weak > 0) e.weak--;
+  }
+  H.log.push(msg);
+  if (H.hp <= 0) { sumPush(H, '被打倒'); H.hp = 0; H.loot = { food: 0, hide: 0, mats: 0 }; H.log.push('你被' + e.n + '打倒，靠著最後一點力氣逃出森林，獵物全丟了'); return huntEnd(S, 'down'); }
+  if (e.hp <= 0) return nextEnc(S, true);
+  H.turn++; setIntent(S);
+  if (H.turn > 12) { H.log.push('僵持太久，' + e.n + '退進林子深處'); return nextEnc(S, false); }
+  return { ok: true };
+}
+function sumPush(H, out) { var c = H.cur; if (!c) return; H.sum.push(c.n + '：' + (c.sk.length ? '用了' + c.sk.join('、') + '，' : '') + c.t + ' 回合' + out + (c.hits ? '，挨了 ' + c.hits + ' 下' : '，沒被碰到')); H.cur = null; }
+function nextEnc(S, killed) {
+  var H = S.hunt, e = H.e; sumPush(H, killed ? '打倒' : '讓牠跑了');
+  if (killed) {
+    var food = Math.round(e.food * (H.scan ? 1.2 : 1)) + (S.lord.cls === 'warrior' ? 2 : 0), mats = 0;
+    if (e.mat && hRoll(S, 'mat') < e.mat + (H.scan ? 0.3 : 0) + (S.lord.cls === 'mage' ? 0.1 : 0)) mats = e.id === 'bear' && hRoll(S, 'mat2') < 0.4 ? 2 : 1;
+    H.loot.food += food; H.loot.hide += e.hide; H.loot.mats += mats; H.kills.push(e.n);
+    H.log.push('打倒' + e.n + '：糧食 +' + food + (e.hide ? '、毛皮 +' + e.hide : '') + (mats ? '、魔獸素材 +' + mats : ''));
+  }
+  H.idx++; if (H.idx >= H.n) return huntEnd(S, 'done');
+  H.hp = Math.min(HUNT.hp, H.hp + HUNT.rest[0]); H.en = Math.min(enMax(S), H.en + HUNT.rest[1]); H.log.push('你喘口氣、包紮一下，繼續往裡走');
+  spawn(S); return { ok: true };
+}
+function huntEnd(S, how) {
+  var H = S.hunt, hurt = 0; H.e = null;
+  if (how === 'down') hurt = 2; else if (H.hp <= HUNT.hp * (S.lord.cls === 'priest' ? 0.25 : HUNT.lightAt)) hurt = 1;
+  H.done = { how: how, hurt: hurt }; return { ok: true, done: true };
+}
+function huntFinish(S) {
+  var H = S.hunt; if (!H || !H.done) return { err: '狩獵還沒結束' };
+  var L = H.loot, d = H.done, where = S.place;
+  S.res.food += L.food; S.res.hide += L.hide; S.res.mats += L.mats; if (d.hurt) S.lord.hurt = Math.max(S.lord.hurt, d.hurt);
+  var head = d.how === 'down' ? '被打倒、空手逃回' : d.how === 'retreat' ? '中途撤退' : (H.kills.length ? '打到' + H.kills.join('、') : '空手而回');
+  var res = '出獵結果：' + head + '。糧食 +' + L.food + (L.hide ? '、毛皮 +' + L.hide : '') + (L.mats ? '、魔獸素材 +' + L.mats : '') + '。' +
+    (d.hurt === 2 ? '領主本人受了重傷，接下來兩天各少一個行動點。' : d.hurt === 1 ? '領主本人受了輕傷，明天少一個行動點。' : '領主沒有受傷。') + '過程：' + (H.sum || []).join('；') + '。';
+  note(S, '領主到' + where + '出獵：' + head + '，糧食 +' + L.food + (L.mats ? '、素材 +' + L.mats : '') + (d.hurt ? '，受傷' : ''));
+  S.hunt = null; S.place = '東村口';
+  return { ok: true, text: '【出獵】我帶著武器進' + where + '打獵，傍晚前從東村口回到村裡。', result: res };
+}
+
 /* ---------- 升格 ---------- */
 function gateMiss(S) {
   var g = CFG.gate, m = []; if (S.tier >= 1) return ['已經是聚落'];
@@ -259,6 +403,7 @@ function gateMiss(S) {
 
 /* ---------- 結束一天 ---------- */
 function endDay(S) {
+  if (S.hunt) { if (!S.hunt.done) huntEnd(S, 'retreat'); huntFinish(S); }
   var rep = { day: S.day, lines: [], narrate: [] }, p = production(S), rnd = rng(hash(S.seed + '|night|' + S.day));
   function L(t, nar) { rep.lines.push(t); if (nar) rep.narrate.push(t); }
   /* 自動出獵 */
@@ -288,6 +433,8 @@ function endDay(S) {
   }
   /* 換日 */
   rep.lines.forEach(function (t) { S.log.push('第 ' + S.day + ' 天夜：' + t); });
+  if (S.buff && S.buff.days > 0) { S.buff.days--; if (!S.buff.days) S.buff.def = 0; }
+  S.card = null;
   S.day++; S.ap = CFG.ap; S.braced = false; S.overseen = {}; S.hunted = 0; S.caravan = null; S.ended = false; S.place = '領主木屋';
   if (S.lord.hurt > 0) { S.ap = Math.max(1, S.ap - 1); S.lord.hurt--; }
   Object.keys(S.hurt).forEach(function (k) { if (S.hurt[k] > 0) S.hurt[k]--; });
@@ -336,6 +483,7 @@ var API = { VER: VER, CFG: CFG, B: B, FOREMEN: FOREMEN, POSTS: POSTS, CLASSES: C
   housing: housing, wellCap: wellCap, popCap: popCap, milCap: milCap, labor: labor, defense: defense, slots: slots, used: used, idle: idle, buildNeed: buildNeed,
   production: production, planNet: planNet, nextRaid: nextRaid, raidForecast: raidForecast, raidIndex: raidIndex, raidStrength: raidStrength, caravanDay: caravanDay,
   setAssign: setAssign, autoAssign: autoAssign, clampAssign: clampAssign, setPost: setPost, buildCheck: buildCheck, startBuild: startBuild, buildList: buildList, costText: costText,
+  HUNT: HUNT, ENEMY: ENEMY, SKILL: SKILL, CARDS: CARDS, ATK: ATK, cardById: cardById, cardChoose: cardChoose, cardOptionCheck: cardOptionCheck, huntAct: huntAct, huntFinish: huntFinish, intentText: intentText, enMax: enMax,
   presence: presence, placeOf: placeOf, act: act, gateMiss: gateMiss, endDay: endDay, stateBlock: stateBlock, dayEndMessage: dayEndMessage, actionMessage: actionMessage, fmt: fmt };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else G.HMCore = API;
 })(typeof window !== 'undefined' ? window : globalThis);

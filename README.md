@@ -10,4 +10,4 @@ LunaTalk 卡《邊境的奇蹟》的全面板。一天一回合：清晨派工�
 - `test/core_test.js`　`node test/core_test.js`
 - `test/e2e.py`　`python test/e2e.py`（要 Playwright 與 Chrome）
 
-版本：面板 2.0.0／規則 2.0.0／載入器 1.0
+版本：面板 2.1.0／規則 2.1.0／載入器 1.0

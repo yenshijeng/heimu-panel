@@ -9,6 +9,27 @@ function inv(S, tag) {
   ok(S.ap >= 0 && S.ap <= 3, tag + ' 行動點異常');
   ok(S.q.length <= C.CFG.queue, tag + ' 佇列超過');
 }
+function huntBot(S, zone) {
+  var r = C.act(S, { k: 'hunt', zone: zone }); if (r.err) return r;
+  var guard = 0;
+  while (S.hunt && !S.hunt.done && guard++ < 80) {
+    var H = S.hunt, e = H.e, sk = C.SKILL[S.lord.cls], a = 'attack';
+    if (H.hp <= 7 && e.atk) a = S.lord.cls === 'priest' && H.en >= 2 ? 'heal' : 'retreat';
+    else if (e.intent === 'heavy') a = S.lord.cls === 'warrior' && H.en >= 1 ? 'parry' : S.lord.cls === 'priest' && H.en >= 2 && !H.shield ? 'ward' : S.lord.cls === 'mage' && H.en >= 2 ? 'ice' : 'defend';
+    else if (S.lord.cls === 'mage' && e.atk >= 5 && H.en >= 2 && !e.stun && e.hp > 8 && H.turn === 1) a = 'ice';
+    else if (S.lord.cls === 'mage' && zone === 'mid' && !H.scan && H.en >= 1 && e.mat) a = 'scan';
+    else if (H.en >= 2) a = sk[0].id === 'heal' ? 'banish' : sk[0].id;
+    var x = C.huntAct(S, a); if (x.err) { ok(false, '出獵動作失敗 ' + a + ' ' + x.err); break; }
+  }
+  ok(guard < 80, '出獵沒有卡死');
+  return C.huntFinish(S);
+}
+// 0. 出獵校準
+['warrior', 'mage', 'priest'].forEach(function (cls) { ['edge', 'mid'].forEach(function (z) {
+  var food = 0, mats = 0, hurt = 0, down = 0, N = 400;
+  for (var i = 0; i < N; i++) { var T = C.newGame('h' + cls + z + i, { cls: cls }); T.has.hut2 = 1; var f0 = T.res.food; var r = huntBot(T, z); food += T.res.food - f0; mats += T.res.mats; if (T.lord.hurt) hurt++; if (T.lord.hurt === 2) down++; inv(T, 'hunt'); ok(!T.hunt, '結束後清掉狩獵狀態'); }
+  console.log(' 出獵 ' + cls + ' ' + z + '：糧食 ' + (food / N).toFixed(1) + '、素材 ' + (mats / N).toFixed(2) + '、受傷 ' + Math.round(hurt / N * 100) + '%（重傷 ' + Math.round(down / N * 100) + '%）');
+}); });
 // 1. 開局
 var S = C.newGame('t1', { name: '測試', cls: 'warrior' });
 ok(C.labor(S) === 9, '開局可派 9 人，實際 ' + C.labor(S));
@@ -28,7 +49,9 @@ ok(C.act(S, { k: 'talk', who: 'hans' }).ok && S.ap === 2, '談話花 1 點');
 ok(C.act(S, { k: 'talk', who: 'alicia' }).err, '艾莉西亞出獵中不能談');
 ok(C.act(S, { k: 'oversee', i: 0 }).ok && S.ap === 1, '監工花 1 點');
 ok(C.act(S, { k: 'oversee', i: 0 }).err, '同一件一天只能監一次');
-ok(C.act(S, { k: 'hunt' }).ok && S.ap === 0, '出獵花 1 點');
+ok(C.act(S, { k: 'patrol' }).ok && S.ap === 0 && S.card, '巡視花 1 點並抽到事件');
+ok(C.act(S, { k: 'talk', who: 'hans' }).err, '事件沒決定前不能做別的');
+var cd = C.cardById(S.card), oi = C.cardOptionCheck(S, cd.o[0]) ? 1 : 0, pc = C.cardChoose(S, oi); ok(pc.ok && !S.card && pc.text.indexOf('【巡視】') === 0, '事件選擇後結算');
 ok(C.act(S, { k: 'hunt' }).err, '沒有行動點');
 ok(C.act(S, { k: 'brace' }).err, '非襲擊日不能備戰');
 var msg = C.actionMessage(S, { text: 'x', result: 'y' }); ok(msg.indexOf('[[HMS]]') > 0 && msg.indexOf('【結果】y') > 0 && msg.indexOf('【不在場】') > 0, '狀態區塊格式');
@@ -50,7 +73,7 @@ function play(seed, verbose) {
     if (C.raidIndex(S.day) >= 0) C.act(S, { k: 'brace' });
     if (S.caravan) C.act(S, { k: 'caravan', n: S.net >= 3 ? 2 : 0 });
     if (S.q.length && S.ap) C.act(S, { k: 'oversee', i: 0 });
-    while (S.ap > 0) { var z = S.has.hut2 && S.ap >= 2 && S.res.mats < 4 ? 'mid' : 'edge'; if (C.act(S, { k: 'hunt', zone: z }).err) break; }
+    while (S.ap > 0) { var z = S.has.hut2 && S.ap >= 2 && S.res.mats < 4 ? 'mid' : 'edge'; if (huntBot(S, z).err) break; }
     inv(S, seed + ' d' + d);
     if (!C.gateMiss(S).length) { var pr = C.act(S, { k: 'promote' }); ok(pr.ok, '升格應成功'); done = d; break; }
     C.endDay(S);

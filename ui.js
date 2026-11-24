@@ -1,7 +1,7 @@
 /* 黑木村 領主帳本 介面 ui.js */
 (function () {
 'use strict';
-var C = window.HMCore, UIVER = '2.0.1';
+var C = window.HMCore, UIVER = '2.1.0';
 var KS = LTStore.create('heimu');
 var EMB = window.parent !== window;
 var DEBUG = /[?&]debug=1/.test(location.search);
@@ -73,9 +73,35 @@ function doAct(a) {
   var snap = JSON.stringify(S), pre = S.pending.slice(), r = C.act(S, a);
   if (r.err) { toast(r.err); return; }
   var u = J('undo') || []; u.push(snap); KS.set('undo', JSON.stringify(u.slice(-5)));
+  if (r.silent) { tab = 'village'; save(); render(); arm(); return; }
   S.pending = [];
   sendToAI(r.text + '\n' + C.stateBlock(S, { result: r.result, digest: pre }), r.text);
   storyPush({ k: 'res', t: r.result }); save(); render(); arm();
+}
+function finishWith(r) { /* 出獵回村、巡視決定：結果已入帳，交給 AI 演出 */
+  if (r.err) { toast(r.err); return; }
+  var pre = S.pending.slice(0, -1); S.pending = [];
+  sendToAI(r.text + '\n' + C.stateBlock(S, { result: r.result, digest: pre }), r.text);
+  storyPush({ k: 'res', t: r.result.split('過程：')[0] }); save(); render(); arm();
+}
+function bar(v, max, cls) { return '<span class="bar ' + cls + '"><i style="width:' + Math.max(0, Math.min(100, Math.round(v / max * 100))) + '%"></i></span>'; }
+function pageHunt() {
+  var H = S.hunt, e = H.e, h = '<div class="card hunt"><h3>' + (H.zone === 'mid' ? '森林中層' : '森林邊緣') + '・第 ' + Math.min(H.idx + 1, H.n) + '/' + H.n + ' 場</h3>';
+  h += '<div class="hrow"><span class="jn">你</span>' + bar(H.hp, C.HUNT.hp, 'hp') + '<b>' + H.hp + '/' + C.HUNT.hp + '</b><span class="muted">氣力 ' + H.en + '/' + C.enMax(S) + (H.shield ? '｜護盾 ' + H.shield : '') + '</span></div>';
+  if (e) h += '<div class="hrow"><span class="jn">' + esc(e.n) + '</span>' + bar(e.hp, e.max, 'ehp') + '<b>' + Math.max(0, e.hp) + '/' + e.max + '</b><span class="warn">' + C.intentText(e) + '</span></div>';
+  h += '<div class="hlog">' + H.log.slice(-5).map(esc).join('<br>') + '</div>';
+  if (H.done) h += '<p>這趟的收穫：糧食 ' + H.loot.food + '、毛皮 ' + H.loot.hide + '、魔獸素材 ' + H.loot.mats + (H.done.hurt === 2 ? '。<span class="warn">你受了重傷。</span>' : H.done.hurt === 1 ? '。<span class="warn">你受了輕傷。</span>' : '') + '</p><div class="row">' + btn('hback', '回村', busy, 'pri') + '</div>';
+  else {
+    h += '<div class="acts">' + btn('hact', '攻擊', false, '', ' data-k="attack"') + btn('hact', '防禦<small>受傷減半、氣力 +1</small>', false, '', ' data-k="defend"');
+    C.SKILL[S.lord.cls].forEach(function (k) { h += btn('hact', k.n + '<small>氣力 ' + k.en + '｜' + k.d + '</small>', H.en < k.en, '', ' data-k="' + k.id + '"'); });
+    h += btn('hact', '撤退<small>收穫減半</small>', false, 'warnb', ' data-k="retreat"') + '</div><p class="muted">目前收穫：糧食 ' + H.loot.food + '、毛皮 ' + H.loot.hide + '、素材 ' + H.loot.mats + '。狩獵過程不會送給 AI，回村後才演出。</p>';
+  }
+  return h + '</div>';
+}
+function pageCard() {
+  var cd = C.cardById(S.card), h = '<div class="card"><h3>巡視・' + esc(cd.place) + '</h3><p>' + esc(cd.t) + '</p>';
+  cd.o.forEach(function (o, i) { var e = C.cardOptionCheck(S, o); h += '<div class="bld"><div><b>' + esc(o.n) + '</b><br><span class="muted">' + esc(o.r) + '</span>' + (e ? '<br><span class="warn">' + e + '</span>' : '') + '</div>' + btn('card', '就這麼辦', !!e || busy, '', ' data-i="' + i + '"') + '</div>'; });
+  return h + '</div>';
 }
 function endDay() {
   if (busy) { toast('AI 還在回覆，等一下'); return; }
@@ -130,6 +156,7 @@ function pageVillage() {
   C.FOREMEN.forEach(function (f) { var away = C.POSTS[S.post[f.id]].away || S.hurt[f.id] > 0; h += btn('talk', '找' + f.n + '談<small>' + C.placeOf(S, f.id) + '</small>', busy || away || S.ap < 1, '', ' data-who="' + f.id + '"'); });
   h += btn('hunt', '親自出獵・邊緣<small>1 點</small>', busy || S.ap < 1 || S.lord.hurt > 0, '', ' data-z="edge"');
   h += btn('hunt', '親自出獵・中層<small>2 點' + (S.has.hut2 ? '' : '｜要獵人小屋 Lv2') + '</small>', busy || S.ap < 2 || !S.has.hut2 || S.lord.hurt > 0, '', ' data-z="mid"');
+  h += btn('patrol', '巡視村子<small>1 點｜會遇到要你決定的事</small>', busy || S.ap < 1);
   if (S.caravan) { var left = S.caravan.offer - S.caravan.bought; h += '<span class="grp">' + btn('caravan', '接待商隊' + (S.caravan.met ? '（已接待）' : '<small>1 點</small>'), busy || (!S.caravan.met && S.ap < 1)) + (left > 0 ? '<select id="buyn">' + [0, 1, 2].filter(function (n) { return n <= left; }).map(function (n) { return '<option value="' + n + '"' + (n === Math.min(buyN, left) ? ' selected' : '') + '>買 ' + n + ' 人（糧 ' + n * C.CFG.slave.food + '）</option>'; }).join('') + '</select>' : '') + '</span>'; }
   if (C.raidIndex(S.day) >= 0) h += btn('brace', S.braced ? '已在備戰' : '到東村口備戰<small>1 點｜防禦 +' + C.CFG.brace + '</small>', busy || S.braced || S.ap < 1, 'warnb');
   h += '</div><div class="row">' + btn('end', '結束這一天', busy, 'pri') + '</div></div>';
@@ -168,7 +195,8 @@ function render() {
   else {
     var TABS = [['story', '劇情'], ['village', '村莊'], ['work', '派工'], ['build', '建造'], ['more', '紀錄']], wide = window.innerWidth >= 760;
     if (wide && tab === 'story') tab = 'village';
-    var pg = { village: pageVillage, work: pageWork, build: pageBuild, more: pageMore, story: pageStory }[tab]();
+    if ((S.hunt || S.card) && tab !== 'story') tab = 'village';
+    var pg = S.hunt && tab !== 'story' ? pageHunt() : S.card && tab !== 'story' ? pageCard() : { village: pageVillage, work: pageWork, build: pageBuild, more: pageMore, story: pageStory }[tab]();
     h += topBar() + '<div class="tabs">' + TABS.filter(function (t) { return !(wide && t[0] === 'story'); }).map(function (t) { return '<button data-a="tab" data-k="' + t[0] + '" class="' + (tab === t[0] ? 'sel' : '') + '">' + t[1] + '</button>'; }).join('') + '</div>';
     h += wide ? '<div class="wide"><div class="col">' + pageStory() + '</div><div class="col pg">' + pg + '</div></div>' : '<div class="pg' + (tab === 'story' ? ' full' : '') + '">' + pg + '</div>';
   }
@@ -186,11 +214,15 @@ app.addEventListener('click', function (e) {
   if (a === 'cls') { var nm = document.getElementById('nm'); nameIn = nm ? nm.value : nameIn; clsIn = b.dataset.k; render(); }
   else if (a === 'start') { var n2 = document.getElementById('nm'); S = C.newGame(String(Date.now()), { name: (n2 && n2.value.trim()) || '領主', cls: clsIn }); story = []; lastRep = null; KS.del('undo'); KS.del('rep'); save(); render(); arm();
     sendToAI('【開局】我是' + S.lord.name + '（' + C.CLASSES[S.lord.cls].n + '），今天起接下黑木村。\n' + C.stateBlock(S, { events: ['新領主上任的第一個清晨，領主獨自在木屋外，還沒有見到任何村民'] }), '【開局】' + S.lord.name + '（' + C.CLASSES[S.lord.cls].n + '）接下黑木村'); }
-  else if (a === 'tab') { tab = b.dataset.k; if (tab === 'story') scrollStory = true; render(); }
+  else if (a === 'tab') { if ((S.hunt || S.card) && b.dataset.k !== 'story' && b.dataset.k !== 'village') { toast(S.hunt ? '你還在森林裡' : '先決定眼前這件事'); return; } tab = b.dataset.k; if (tab === 'story') scrollStory = true; render(); }
   else if (a === 'talk') doAct({ k: 'talk', who: b.dataset.who });
   else if (a === 'hunt') doAct({ k: 'hunt', zone: b.dataset.z });
   else if (a === 'caravan') { var sel = document.getElementById('buyn'); doAct({ k: 'caravan', n: sel ? Number(sel.value) : 0 }); }
   else if (a === 'brace') doAct({ k: 'brace' });
+  else if (a === 'patrol') doAct({ k: 'patrol' });
+  else if (a === 'hact') { var hr = C.huntAct(S, b.dataset.k); if (hr.err) toast(hr.err); save(); render(); }
+  else if (a === 'hback') { if (busy) { toast('AI 還在回覆，等一下'); return; } finishWith(C.huntFinish(S)); }
+  else if (a === 'card') { if (busy) { toast('AI 還在回覆，等一下'); return; } var snapC = JSON.stringify(S), cr = C.cardChoose(S, Number(b.dataset.i)); if (!cr.err) { var uu = J('undo') || []; uu.push(snapC); KS.set('undo', JSON.stringify(uu.slice(-5))); } finishWith(cr); }
   else if (a === 'promote') doAct({ k: 'promote' });
   else if (a === 'oversee') doAct({ k: 'oversee', i: Number(b.dataset.i) });
   else if (a === 'end') endDay();
