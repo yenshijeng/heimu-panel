@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>黑木村・領主帳本</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#14110d;--card:#1e1a14;--line:#3a3222;--tx:#e6dfd0;--mut:#9a9080;--gold:#d9b25c;--red:#d8664f;--grn:#8fb573}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font:15px/1.6 "Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif}
+#app{height:100%;display:flex;flex-direction:column}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#4a4030;border-radius:4px}::-webkit-scrollbar-track{background:transparent}
+button{font:inherit;color:var(--tx);background:#2a241a;border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
+button:disabled{opacity:.42;cursor:default}button.pri{background:#5a4420;border-color:var(--gold);color:#ffe9b8}button.warnb{border-color:var(--red);color:#ffc9bd}
+button small{display:block;font-size:11px;color:var(--mut)}button.sel{border-color:var(--gold);color:var(--gold)}
+select,input,textarea{font:inherit;color:var(--tx);background:#120f0b;border:1px solid var(--line);border-radius:8px;padding:7px 9px;max-width:100%}
+textarea{width:100%;resize:vertical}
+.top{display:flex;flex-wrap:wrap;gap:4px 12px;padding:6px 12px;background:#1a1610;border-bottom:1px solid var(--line);font-size:13px}.top b{color:var(--gold)}.ap{color:var(--gold);letter-spacing:2px}
+.warn{color:var(--red)}.muted{color:var(--mut);font-size:13px}.err{background:#5a1f16;color:#ffd9d0;padding:8px 12px}
+.tabs{display:flex;gap:6px;padding:6px 10px;overflow-x:auto;border-bottom:1px solid var(--line)}.tabs button{white-space:nowrap;padding:6px 14px}
+.pg{flex:1;overflow-y:auto;padding:10px;min-height:0}.pg.full{display:flex;flex-direction:column;padding:0}
+.wide{flex:1;display:flex;min-height:0}.wide .col{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}.wide .col.pg{display:block;border-left:1px solid var(--line)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}.card h2,.card h3{margin:0 0 8px;color:var(--gold);font-size:16px}.card h2{font-size:20px}
+.card ul{margin:0;padding-left:20px}.miss li{color:#f0c9a0}
+.acts{display:flex;flex-wrap:wrap;gap:8px}.acts button{text-align:left}.grp{display:inline-flex;gap:6px;align-items:stretch}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.job{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed #2c261b;flex-wrap:wrap}.job:last-of-type{border-bottom:0}.jn{min-width:82px}.jn small{display:block;color:var(--mut);font-size:11px}
+.step{width:36px;height:36px;padding:0;font-size:18px}.job b{min-width:52px;text-align:center}
+.bld{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed #2c261b}.bld small{color:var(--mut);margin-left:6px}
+.cls{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}.cls button{flex:1;min-width:110px;text-align:left}label{display:block;margin-top:10px}label input{display:block;margin-top:4px;width:220px}
+.story{flex:1;overflow-y:auto;padding:12px 14px;min-height:0}.story p{margin:0 0 10px}.story .d{border-left:3px solid var(--gold);padding-left:10px;color:#f3e6c4}
+.story .st{color:var(--gold);font-size:13px;margin:6px 0 8px}.story .me{margin:14px 0 8px auto;max-width:88%;background:#2f2718;border-radius:10px;padding:6px 10px;width:fit-content;color:#f0e2c0}
+.story .res{background:#1c2417;border:1px solid #34452a;color:#cfe3bd;border-radius:8px;padding:6px 10px;margin:0 0 10px;font-size:13px}.story .opt{display:block;margin:6px 0;text-align:left;width:100%}
+.say{display:flex;gap:8px;padding:8px 10px calc(8px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:#1a1610}.say textarea{flex:1;resize:none}
+.log{max-height:300px;overflow-y:auto;font-size:13px;color:#cfc6b4}
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}.modal{background:var(--card);border:1px solid var(--gold);border-radius:12px;padding:16px;max-width:460px;width:100%}.modal h3{margin:0 0 8px;color:var(--gold)}
+#toast{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);background:#000c;color:#fff;padding:8px 14px;border-radius:18px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90%;z-index:20}#toast.on{opacity:1}
+</style>
+</head>
+<body>
+<div id="app"></div><div id="toast"></div>
+<script src="store.js"></script>
+<script src="core.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>

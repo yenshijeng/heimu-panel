@@ -1,0 +1,13 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>fake host</title></head><body>
+<div id="app"><div id="chat" style="width:100%;height:600px">
+<div id="msgs"><div class="message-item is-ai ai-message" data-lt="message" data-lt-role="ai"><div class="message-bubble"><p>黑木村的清晨。</p></div></div></div>
+<div id="lunatalk-input"><textarea class="uni-textarea-textarea"></textarea><button data-lt="send" id="send">send</button></div></div></div>
+<script>
+window.sent=[];var bs=null;
+window.luna={beforeSend:function(f){bs=f},on:function(){}};
+document.getElementById('send').onclick=function(){var ta=document.querySelector('textarea'),t=ta.value;if(!t)return;if(bs)t=bs(t);window.sent.push(t);ta.value='';
+var u=document.createElement('div');u.className='message-item is-user';u.setAttribute('data-lt','message');u.setAttribute('data-lt-role','user');u.textContent=t;document.getElementById('msgs').appendChild(u);};
+window.aiSay=function(lines){var a=document.createElement('div');a.className='message-item is-ai ai-message';a.setAttribute('data-lt','message');a.setAttribute('data-lt-role','ai');a.innerHTML='<div class="message-bubble">'+lines.map(function(l){return '<p>'+l+'</p>'}).join('')+'</div>';document.getElementById('msgs').appendChild(a);};
+</script>
+<script src="/loader_local.js"></script>
+</body></html>

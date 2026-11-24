@@ -1,0 +1,63 @@
+import subprocess, time, sys, os, re
+from playwright.sync_api import sync_playwright
+root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+src = open(root + '/loader/host_v1.0.js', encoding='utf8').read().replace("https://yenshijeng.github.io/heimu-panel/", "http://127.0.0.1:8811/index.html")
+open(root + '/test/loader_local.js', 'w', encoding='utf8').write(src)
+p1 = subprocess.Popen([sys.executable, '-m', 'http.server', '8811', '--bind', '127.0.0.1'], cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+p2 = subprocess.Popen([sys.executable, '-m', 'http.server', '8812', '--bind', '127.0.0.1'], cwd=root + '/test', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(1.2)
+ok = 0; bad = 0
+def chk(c, m):
+    global ok, bad
+    if c: ok += 1
+    else: bad += 1; print('✗', m)
+try:
+    with sync_playwright() as pw:
+        b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+        # ---- A. 獨立開啟（手機寬度）----
+        pg = b.new_page(viewport={'width': 420, 'height': 800}); errs = []
+        pg.on('pageerror', lambda e: errs.append(str(e))); pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
+        pg.goto('http://127.0.0.1:8811/index.html'); pg.wait_for_selector('[data-a=start]')
+        pg.fill('#nm', '阿測'); pg.click('[data-a=cls][data-k=mage]'); pg.click('[data-a=start]')
+        pg.wait_for_function('window.__hm && window.__hm.S && window.__hm.S.day===1')
+        chk(pg.evaluate('__hm.S.lord.name') == '阿測' and pg.evaluate('__hm.S.lord.cls') == 'mage', 'A1 建角')
+        pg.click('[data-a=tab][data-k=build]'); pg.click('[data-a=build][data-k=house]')
+        chk(pg.evaluate('__hm.S.q.length') == 1 and pg.evaluate('__hm.S.res.wood') == 20, 'A2 開工扣木')
+        pg.click('[data-a=tab][data-k=work]'); pg.click('[data-a=auto]')
+        chk(pg.evaluate('__hm.C.used(__hm.S) <= __hm.C.labor(__hm.S)'), 'A3 派工不超額')
+        pg.click('[data-a=auto]'); pg.click('[data-a=dec][data-j=farm]'); idle = pg.evaluate('__hm.C.idle(__hm.S)'); chk(idle >= 1, 'A4 減人後有閒置')
+        pg.select_option('select[data-post=alicia]', 'guard'); chk(pg.evaluate('__hm.C.defense(__hm.S)') == 23, 'A5 艾莉西亞守門防禦 23')
+        pg.click('[data-a=tab][data-k=village]'); pg.click('[data-a=talk][data-who=hans]')
+        chk(pg.evaluate('__hm.S.ap') == 2, 'A6 談話花行動點')
+        pg.click('[data-a=tab][data-k=village]'); pg.click('[data-a=end]'); pg.wait_for_selector('.modal'); pg.click('[data-a=modal][data-i="0"]')
+        pg.wait_for_function('window.__hm.S.day===2'); chk(True, 'A7 日結')
+        pg.click('[data-a=tab][data-k=more]'); pg.click('[data-a=undo]'); chk(pg.evaluate('__hm.S.day') == 1, 'A8 復原回第 1 天')
+        pg.click('[data-a=tab][data-k=village]'); pg.click('[data-a=end]'); pg.click('[data-a=modal][data-i="0"]'); pg.wait_for_function('window.__hm.S.day===2')
+        time.sleep(0.3); pg.reload(); pg.wait_for_function('window.__hm && window.__hm.S'); chk(pg.evaluate('__hm.S.day') == 2, 'A9 重新整理後進度還在')
+        chk(pg.evaluate('__hm.KS.mode') == 'idb', 'A10 存檔在 IndexedDB')
+        chk(not errs, 'A 無錯誤：' + '|'.join(errs[:3])); pg.close()
+        # ---- B. 嵌入假聊天頁（桌機寬度）----
+        ctx = b.new_context(viewport={'width': 1280, 'height': 800}); hp = ctx.new_page(); herr = []
+        hp.on('pageerror', lambda e: herr.append(str(e)))
+        hp.goto('http://127.0.0.1:8812/fake_host.html'); hp.wait_for_selector('#hm2-root iframe')
+        fr = hp.frame_locator('#hm2-root iframe'); fr.locator('[data-a=start]').wait_for()
+        fr.locator('#nm').fill('嵌入'); fr.locator('[data-a=start]').click()
+        hp.wait_for_function('window.sent.length>=1', timeout=8000)
+        s0 = hp.evaluate('window.sent[0]'); chk(s0.startswith('【開局】') and '[[HMS]]' in s0 and '【帳本】第1天' in s0 and '[[/HMS]]' in s0, 'B1 開局訊息含帳本')
+        chk(s0.count('[[HMS]]') == 1, 'B2 不重複附帳本')
+        hp.evaluate("aiSay(['【第1天｜清晨｜領主木屋】','霧還沒散。','【漢斯】「領主，早。」'])")
+        fr.locator('.story .d').first.wait_for(timeout=8000); chk('領主，早' in fr.locator('.story').inner_text(), 'B3 劇情頁顯示 AI 回覆')
+        time.sleep(4.5)
+        fr.locator('[data-a=talk][data-who=hans]').click(); hp.wait_for_function('window.sent.length>=2', timeout=8000)
+        s1 = hp.evaluate('window.sent[1]'); chk(s1.startswith('【談話】') and '【在場】漢斯' in s1 and '艾莉西亞（森林）' in s1, 'B4 談話訊息與在場名單')
+        hp.evaluate("aiSay(['漢斯放下帳冊。'])"); time.sleep(5)
+        chk(hp.evaluate("document.querySelector('#hm2-root').className.indexOf('hm2-min')<0"), 'B5 送出後面板維持開啟')
+        hp.click('.hm2-x'); chk(hp.evaluate("document.querySelector('#hm2-root').className.indexOf('hm2-min')>=0"), 'B6 回聊天會縮成圓鈕')
+        hp.fill('#lunatalk-input textarea', '我看看窗外'); hp.click('#send')
+        s2 = hp.evaluate('window.sent[window.sent.length-1]'); chk(s2.startswith('我看看窗外') and '[[HMS]]' in s2, 'B7 自己打字也會附帳本')
+        hp.click('.hm2-fab'); chk(hp.evaluate("document.querySelector('#hm2-root').className.indexOf('hm2-min')<0"), 'B8 圓鈕可重新打開')
+        chk(not herr, 'B 宿主無錯誤：' + '|'.join(herr[:3]))
+        b.close()
+finally:
+    p1.terminate(); p2.terminate()
+print(ok, '通過，', bad, '失敗'); sys.exit(1 if bad else 0)
